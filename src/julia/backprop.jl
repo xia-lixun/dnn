@@ -1,7 +1,8 @@
 # backpropagation of fully connected dnn
 # lixun 2017-11-07
 #
-#  X(4) => 8 => 8 => 4 fully connected nn
+using HDF5
+# layers: [784,30,10] for example the MNIST data
 # a: activations, for example sigmoid(z) = sigmoid(aw+b) 
 # w: weights
 # b: biases
@@ -33,7 +34,7 @@ mutable struct net{T <: AbstractFloat}
         z = deepcopy(a)
         δ = deepcopy(a)
     
-        w = [[zeros(T,length(a[1]),1)]; [randn(T,length(a[i]),length(a[i-1])) for i = 2:L]]
+        w = [[zeros(T,length(a[1]),1)]; [randn(T,length(a[i]),length(a[i-1]))./sqrt(T(length(a[i-1]))) for i = 2:L]]
         b = [[zeros(T,length(a[1]))]; [randn(T,length(a[i])) for i = 2:L]]
     
         ∂C∂w = deepcopy(w)
@@ -156,19 +157,19 @@ end
 
 function simple()
     
-    train_x = h5read("dnn/mnist.h5", "mnist/train_image")  #Float32 784 x 50000
-    train_l = h5read("dnn/mnist.h5", "mnist/train_label")  #Int64 1 x 50000
+    train_x = h5read("data/mnist.h5", "mnist/train_image")  #Float32 784 x 50000
+    train_l = h5read("data/mnist.h5", "mnist/train_label")  #Int64 1 x 50000
 
-    valid_x = h5read("dnn/mnist.h5", "mnist/test_image")  #Float32 784 x 10000
-    valid_l = h5read("dnn/mnist.h5", "mnist/test_label")  #Int64 1 x 10000
+    valid_x = h5read("data/mnist.h5", "mnist/test_image")  #Float32 784 x 10000
+    valid_l = h5read("data/mnist.h5", "mnist/test_label")  #Int64 1 x 10000
 
     batch_valid = [(valid_x[:,i], valid_l[i]) for i = 1:length(valid_l)]
     batch_valid4cost = [(valid_x[:,i], onehot(Float32,10,valid_l[i])) for i = 1:length(valid_l)]
 
 
-    nn = net{Float32}([784,100,10])
+    nn = net{Float32}([784,100,100,10])
     epoch = 30
-    η = 0.5f0
+    η = 0.1f0
     λ = 5.0f0
     minibatchsize = 10
     minibatches = div(length(train_l), minibatchsize)
