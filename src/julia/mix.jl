@@ -353,29 +353,28 @@ end
 
 
 # remove old feature.h5 and make new
-function feature(specification, label)
+function feature(specification, label, gain)
 
     # mixed file and label info
     a = JSON.parsefile(label)
-    s = JSON.parsefile(specification)          
+    g = JSON.parsefile(gain)
+    s = JSON.parsefile(specification)
+
+    assert(s["sample_space"] == length(a))
     
-    rate = s["sample_rate"]
-    n = s["sample_space"]       
-    mixroot = s["mix_root"]
-    h5 = s["mix_feature"]
 
     # remove existing .h5 training/valid/test data
-    rm(joinpath(mixroot,h5), force=true)
+    rm(joinpath(s["mix_root"],s["mix_feature"]), force=true)
 
     # level of the clean speech 
-    speechlev = readdlm(joinpath(s["speech_root"],"index.level"), ',', header=false, skipstart=3)
-    speechlev = Dict(speechlev[i,1] => speechlev[i,2:end] for i = 1:size(speechlev,1))
-    # speechlev["path-to-speech.wav"] => [peak, level(dB), length]
+    spl = readdlm(joinpath(s["speech_root"],"index.level"), ',', header=false, skipstart=3)
+    spl = Dict(spl[i,1] => spl[i,2:end] for i = 1:size(spl,1))
+    # spl["path-to-speech.wav"] => [peak, level(dB), length]
 
     # feature specification
     m = s["feature"]["frame_size"]
     d = s["feature"]["step_size"]
-    param = Frame1D{Int64}(rate, m, d, 0)
+    param = Frame1D{Int64}(s["sample_rate"], m, d, 0)
     win = Dict("Hamming"=>hamming, "Hann"=>hann)
 
     # process each mixed to spectral domain
@@ -392,35 +391,39 @@ function feature(specification, label)
         #[7]"2"
         #[8]"3"      
         #[9]"-22.0"    
-        #[10]"20.0"
-        noiseref = joinpath(s["noise_root"],p[2],p[3]) * ".wav"
-        speechref = joinpath(s["speech_root"],p[4],p[5],p[6]) * ".wav"
-        noisedup = parse(Int64,p[7])
-        speechdup = parse(Int64,p[8])
-        tagspl = parse(Float64,p[9])
+        #[10]"20.0" 
+        noise_dup = parse(Int64,p[7])
+        speech_dup = parse(Int64,p[8])
 
-        refspl = si[ref][2]
-        refpk = si[ref][1]
+        x_mix = wavread(j)[1][:,1]
+        x_noise = wavread(joinpath(s["noise_root"],p[2],p[3]) * ".wav")[1][:,1]
+        x_speech = wavread(joinpath(s["speech_root"],p[4],p[5],p[6]) * ".wav")[1][:,1]
 
-        x = wavread(i)[1][:,1]
-        r = wavread(ref)[1][:,1]
+        #g = 10^((tagspl-refspl)/20)
+        #g * refpk > 1 && (g = 1 / refpk; info("relax gain to avoid clipping $(refpk):$(refspl)->$(tagspl)(dB)"))
+        #r = g * repeat(r, outer=dup) #level speech to target level
+        x_speech = g[j][1] .* repeat(x_speech, outer=speech_dup)
+        x_noise .*= g[j][2]
+        x_noise_ = zeros(size(x_speech))
+        for k in a[j]
+            x_noise_[k[1]:k[2]] = x_noise
+        end
+               
+        #wavwrite([x r], i*"label",Fs=s["sample_rate"])
+        #pxx = power_spectrum(x, param, m, window=win[s["feature"]["window_function"]])
+        #prr = power_spectrum(r, param, m, window=win[s["feature"]["window_function"]])
 
-        g = 10^((tagspl-refspl)/20)
-        g * refpk > 1 && (g = 1 / refpk; info("relax gain to avoid clipping $(refpk):$(refspl)->$(tagspl)(dB)"))
-        r = g * repeat(r, outer=dup) #level speech to target level
-        
-        #wavwrite([x r], i*"label",Fs=fs)
-        pxx = power_spectrum(x, param, m, window=win[s["feature"]["window_function"]])
-        prr = power_spectrum(r, param, m, window=win[s["feature"]["window_function"]])
-
-        h5write(i[1:end-length(".wav")]*".h5", "noisy", transpose(log.(pxx.+eps())))
-        h5write(i[1:end-length(".wav")]*".h5", "clean", transpose(log.(prr.+eps())))
+        #h5write(i[1:end-length(".wav")]*".h5", "noisy", transpose(log.(pxx.+eps())))
+        #h5write(i[1:end-length(".wav")]*".h5", "clean", transpose(log.(prr.+eps())))
         #??? x 257 matrix
+        h5write(joinpath(s["mix_root"],s["mix_feature"]), "$j/speech", x_speech)
+        h5write(joinpath(s["mix_root"],s["mix_feature"]), "$j/noise", x_noise_)
+        h5write(joinpath(s["mix_root"],s["mix_feature"]), "$j/mix", x_mix)
 
-        pt = Int64(round((j/length(a))*100))
+        pt = Int64(round((i/length(a))*100))
         in(pt, 0:10:100) && (pt != ptz) && (ptz = pt; println("%$pt"))
     end
-    info("feature done.")
+    info("feature complete.")
 end
 
 
