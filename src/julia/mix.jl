@@ -504,7 +504,7 @@ function context(specification, partitions::Int64)
     s = JSON.parsefile(specification) 
     m = div(s["feature"]["frame_size"], 2) + 1 # m = 257
     radius = s["feature"]["frame_neighbour"]
-    periph = (2radius+1+1) * m
+    periph = (2radius+2) * m
 
     # extract global stat info
     stat = joinpath(s["mix_root"],"global.h5")
@@ -515,11 +515,11 @@ function context(specification, partitions::Int64)
     # context processing
     fid = h5open(joinpath(s["mix_root"],s["hdf5"]),"r")
     groups = names(fid)
-    ng = length(groups)
-    np = div(ng, partitions)
+    np = div(length(groups), partitions)  # groups per partitions
 
     
     for i = 0:partitions-1
+
         # find out the size of each partition
         nf = zeros(Int64, np)
         for j = 1:np
@@ -530,11 +530,11 @@ function context(specification, partitions::Int64)
 
         # fill in each partition with context data and nat data
         fin = cumsum(nf)
-        sta = vcat(1, 1+fin[1:end-1])
+        start = vcat(1, 1+fin[1:end-1])
         ptz = -1
         for j = 1:np
-            data[sta[j]:fin[j],:] = sliding(read(fid[groups[i*np+j]]["mix"]), radius, μ, σ)        
-            label[sta[j]:fin[j],:] = read(fid[groups[i*np+j]]["speech"])
+            data[start[j]:fin[j],:] = sliding!(read(fid[groups[i*np+j]]["mix"]), radius, μ, σ)        
+            label[start[j]:fin[j],:] = (read(fid[groups[i*np+j]]["speech"]) .- (μ')) ./ (σ')
 
             # update progress
             pt = Int64(round(100 * (j/np)))
@@ -545,11 +545,57 @@ function context(specification, partitions::Int64)
         h5write(pathout, "label", label)
         info("partition $i ok")
     end
+
     close(fid)
 end
 
 # x = L x 257 matrix
 # return y: L x (257*(neighbour*2+1+1))
-function sliding(x, neighbour, μ, σ)
+symm(i,r) = i-r:i+r
+function sliding!(x::Array{Float64,2}, r::Int64, μ::Array{Float64,1}, σ::Array{Float64,1})
 
+    # normalize
+    x = (x.-(μ'))./(σ')
+
+    # get sliding frame context
+    m, n = size(x)
+    head = repmat(x[1,:]', r, 1)
+    tail = repmat(x[end,:]', r, 1)
+    x = vcat(head, x, tail)
+
+    y = zeros(m,(2r+2)*n)
+    for i = 1:m
+        focus = x[symm(r+i,r),:]
+        nat = sum(focus,1)[1,:] / (2r+1)
+        y[i,:] = vec(hcat(transpose(focus),nat))
+    end
+    y
+end
+
+
+
+
+
+
+
+function datagen()
+    valid_spec = "D:\\4-Workspace\\mix\\valid\\specification-2017-11-13T16-50-41-801.json"
+    valid_lab = "D:\\4-Workspace\\mix\\valid\\label.json"
+    valid_glob = "D:\\4-Workspace\\mix\\valid\\global.h5"
+    valid_gain = "D:\\4-Workspace\\mix\\valid\\gain.json"
+
+    train_spec = "D:\\4-Workspace\\mix\\train\\specification-2017-11-13T16-50-41-801.json"
+    train_lab = "D:\\4-Workspace\\mix\\train\\label.json"
+    train_glob = "D:\\4-Workspace\\mix\\train\\global.h5"
+    train_gain = "D:\\4-Workspace\\mix\\train\\gain.json"
+
+    mix(train_spec)                                  # generate mixed wav with labelings and gains
+    feature(train_spec, train_lab, train_gain)       # extract plain features, to valid.h5/train.h5
+    gstat(train_spec)                                # find out the global stats: mean/std/total frames
+    context(train_spec, 10)                           # convert plain features to tensor input    
+
+    mix(valid_spec)                                  # generate mixed wav with labelings and gains
+    feature(valid_spec, valid_lab, valid_gain)       # extract plain features, to valid.h5/train.h5
+    gstat(valid_spec)                                # find out the global stats: mean/std/total frames
+    context(valid_spec, 1)                           # convert plain features to tensor input
 end
