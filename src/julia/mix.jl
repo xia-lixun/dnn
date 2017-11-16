@@ -498,7 +498,7 @@ end
 #######line of pure graceful and joy#######
 # specification.json
 # partitions: number of .h5's as output
-function context(specification, partitions::Int64)
+function context(specification, partitions::Int64, specification_train)
 
     # read the specification for feature extraction
     s = JSON.parsefile(specification) 
@@ -507,8 +507,10 @@ function context(specification, partitions::Int64)
     periph = (2radius+2) * m
 
     # extract global stat info
-    stat = joinpath(s["mix_root"],"global.h5")
-    n = h5read(stat,"frames")
+    # note that the global stat must be of training
+    s_train = JSON.parsefile(specification_train)
+    stat = joinpath(s_train["mix_root"],"global.h5")
+    #n = h5read(stat,"frames")
     μ = h5read(stat,"mu")
     σ = h5read(stat,"std")
 
@@ -589,13 +591,13 @@ function datagen()
     train_glob = "D:\\4-Workspace\\mix\\train\\global.h5"
     train_gain = "D:\\4-Workspace\\mix\\train\\gain.json"
 
-    mix(train_spec)                                  # generate mixed wav with labelings and gains
-    feature(train_spec, train_lab, train_gain)       # extract plain features, to valid.h5/train.h5
-    gstat(train_spec)                                # find out the global stats: mean/std/total frames
-    context(train_spec, 10)                           # convert plain features to tensor input    
+    #mix(train_spec)                                  # generate mixed wav with labelings and gains
+    #feature(train_spec, train_lab, train_gain)       # extract plain features, to valid.h5/train.h5
+    #gstat(train_spec)                                # find out the global stats: mean/std/total frames
+    #context(train_spec, 10, train_spec)                           # convert plain features to tensor input    
 
     mix(valid_spec)                                  # generate mixed wav with labelings and gains
     feature(valid_spec, valid_lab, valid_gain)       # extract plain features, to valid.h5/train.h5
     gstat(valid_spec)                                # find out the global stats: mean/std/total frames
-    context(valid_spec, 1)                           # convert plain features to tensor input
+    context(valid_spec, 1, train_spec)                           # convert plain features to tensor input
 end

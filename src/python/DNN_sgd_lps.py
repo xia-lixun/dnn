@@ -207,8 +207,7 @@ for epoch in range(n_epochs):
         except:
             pass
 
-        data_part = scio.loadmat(
-            '/home/hyli/Data/InternData/trainDB_lps_shuffle/NormContextData_Part'+str(part_num+1)+'.mat')
+        data_part = scio.loadmat('/home/hyli/Data/InternData/trainDB_lps_shuffle/NormContextData_Part'+str(part_num+1)+'.mat')
         _data = np.array(data_part['data'], dtype='float32')
         _label = np.array(data_part['label'], dtype='float32')
         del data_part

@@ -132,40 +132,27 @@ sess.run(init)
 
 n_epochs = 50
 batch_size = 128
-part_num_total = 230
+part_num_total = 10
 
 
 ##########################
 #########DATA#############
 ##########################
 
-stat = h5py.File("D:\\4-Workspace\\mix\\train\\global.h5")
-mu = np.array(stat["/mu"], dtype='float32')
-std = np.array(stat["/std"], dtype='float32')
-n_train = np.int64(stat["/frames"])
+# note: in h5 data are in N x 257/2056 format
+#       transpose to maintain the format unchanged for tf
+fid_valid = h5py.File("D:\\4-Workspace\\mix\\valid\\tensor-0.h5")
+t_valid_data = np.array(fid_valid["/data"], dtype='float32').transpose()
+t_valid_label = np.array(fid_valid["/label"], dtype='float32').transpose()
+del fid_valid
 
-
-train = h5py.File("D:\\4-Workspace\\mix\\train\\train.h5", "r")
-_data = np.zeros([1, 257*8])
-_label = np.zeros([1, 257])
-for g in train:
-    mix = np.array(train[g + "/mix"], dtype='float32').transpose()
-    _data = np.concatenate((_data, gen_context(mix, 3, mu, std)), axis=0)
-
-    speech = np.array(train[g + "/speech"], dtype='float32').transpose()
-    _label = np.concatenate((_label, (speech-mu)/std), axis=0)
-
-_data = _data[1:_data.shape[0]]
-_label = _label[1:_data.shape[0]]
-
-del train
 
 
 ##########################
 #########PROCESS##########
 ##########################
 print("FineTuning begin")
-Cost_validation = sess.run(cost_fine, feed_dict={x: _data, t: _label, keep_prob: 1.0})
+Cost_validation = sess.run(cost_fine, feed_dict={x: t_valid_data, t: t_valid_label, keep_prob: 1.0})
 print('EPOCH: 0, Validation cost: %.3f ' % (Cost_validation))
 cost_valid_best = 1000000
 
@@ -181,24 +168,39 @@ for epoch in range(n_epochs):
     if(epoch>10):
         lrate = 0.0005
 
+
     time_start = time.time()
-    _data, _label = shuffle(_data, _label)
-    n_batches = _data.shape[0] // batch_size
+    part_num_list = shuffle(range(part_num_total))
+    for part_num in part_num_list:
+        try:
+            del data_part
+            del _data
+            del _label
+        except:
+            pass
 
-    for i in range(n_batches):
-        start = i * batch_size
-        end = start + batch_size
-        sess.run(train_fine,feed_dict={x: _data[start:end], t: _label[start:end], keep_prob: 0.8, lrate_p : lrate, mt_p: mt})
+        data_part = h5py.File('D:\\4-Workspace\\mix\\train\\tensor-' + str(part_num) + '.h5')
+        _data = np.array(data_part["/data"], dtype='float32').transpose()
+        _label = np.array(data_part["/label"], dtype='float32').transpose()
+        del data_part
 
-    Cost_validation = sess.run(cost_fine, feed_dict={x: data_valid, t: label_valid, keep_prob: 1.0})
+        _data, _label = shuffle(_data, _label)
+        n_batches = _data.shape[0] // batch_size
+
+        for i in range(n_batches):
+            start = i * batch_size
+            end = start + batch_size
+            sess.run(train_fine, feed_dict={x: _data[start:end], t: _label[start:end], keep_prob: 0.8, lrate_p: lrate, mt_p: mt})
+        print('part %i finished'%(part_num))
+
+    Cost_validation = sess.run(cost_fine, feed_dict={x: t_valid_data, t: t_valid_label, keep_prob: 1.0})
     time_end = time.time()
     print('EPOCH: %i, Validation cost: %.3f ' % (epoch + 1, Cost_validation))
-    print('Elapsed time for one epoch is %.3f' % (time_end-time_start))
-    LOG.write('EPOCH: %i, Validation cost: %.3f \n' %
-              (epoch + 1, Cost_validation))
-    LOG.flush()
+    print('Elapsed time for one epoch is %.3f' % (time_end - time_start))
+    #LOG.write('EPOCH: %i, Validation cost: %.3f \n' %(epoch + 1, Cost_validation))
+    #LOG.flush()
 
-    if(Cost_validation < cost_valid_best):
+    if (Cost_validation < cost_valid_best):
         save_dict = {}
         save_dict['W1'] = sess.run(layers[0].W)
         save_dict['b1'] = sess.run(layers[0].b)
@@ -209,21 +211,18 @@ for epoch in range(n_epochs):
         save_dict['W4'] = sess.run(layers[3].W)
         save_dict['b4'] = sess.run(layers[3].b)
 
-        MATFILE = '/home/hyli/Data/InternData/DNN_full_sgd_lr0002.mat'
+        MATFILE = 'D:\\4-Workspace\\mix\\train\\specification-2017-11-13T16-50-41-801.mat'
         scio.savemat(MATFILE, save_dict)
         cost_valid_best = Cost_validation
-        print('Model in EPOCH:%d is saved' % (epoch+1))
-        LOG.write('Model in EPOCH:%d is saved' % (epoch+1))
-    saver.save(sess,'/home/hyli/Data/InterData/DNN_full_sgd_lr0002_next_model')
+        print('Model in EPOCH:%d is saved' % (epoch + 1))
+        #LOG.write('Model in EPOCH:%d is saved' % (epoch + 1))
+    saver.save(sess, 'D:\\4-Workspace\\mix\\train\\specification-2017-11-13T16-50-41-801.tf')
 
-
-LOG.close()
-del data_valid
-del label_valid
+#LOG.close()
+del t_valid_data
+del t_valid_label
 del _data
 del _label
-
-
 sess.close()
 
 
@@ -238,7 +237,29 @@ sess.close()
 
 
 
-x = np.array(valid["D:\\4-Workspace\\mix\\valid\\wav\\628+stationary+pink2688000+dr2+mbjk0+si2128+1+1+-22.0+5.0.wav/mix"], dtype='float32').transpose()
+# stat = h5py.File("D:\\4-Workspace\\mix\\train\\global.h5")
+# mu = np.array(stat["/mu"], dtype='float32')
+# std = np.array(stat["/std"], dtype='float32')
+# n_train = np.int64(stat["/frames"])
+#
+#
+# train = h5py.File("D:\\4-Workspace\\mix\\train\\train.h5", "r")
+# _data = np.zeros([1, 257*8])
+# _label = np.zeros([1, 257])
+# for g in train:
+#     mix = np.array(train[g + "/mix"], dtype='float32').transpose()
+#     _data = np.concatenate((_data, gen_context(mix, 3, mu, std)), axis=0)
+#
+#     speech = np.array(train[g + "/speech"], dtype='float32').transpose()
+#     _label = np.concatenate((_label, (speech-mu)/std), axis=0)
+#
+# _data = _data[1:_data.shape[0]]
+# _label = _label[1:_data.shape[0]]
+#
+# del train
+
+
+# x = np.array(valid["D:\\4-Workspace\\mix\\valid\\wav\\628+stationary+pink2688000+dr2+mbjk0+si2128+1+1+-22.0+5.0.wav/mix"], dtype='float32').transpose()
 # load data in n x NFFT/2+1 format
 # print(np.size(x,0))
 # print(np.size(x,1))
@@ -250,9 +271,9 @@ x = np.array(valid["D:\\4-Workspace\\mix\\valid\\wav\\628+stationary+pink2688000
 # print(z)
 # print(np.size(z,0))
 # print(np.size(z,1))
-z = gen_context(x, 3, mu, std)
-print(z[1,:])
-print(z[-1,:])
+# z = gen_context(x, 3, mu, std)
+# print(z[1,:])
+# print(z[-1,:])
 
 
 
