@@ -5,7 +5,10 @@ using SHA
 using WAV
 using JSON
 using HDF5
+
 include("audiofeatures.jl")
+include("forward.jl")
+include("indicator.jl")
 
 
 
@@ -31,13 +34,13 @@ function fsha256(list)
 
     d = zeros(UInt8,32)
     n = length(list)
-    pz = -1
+    p = indicator(10)
+
     for (i,j) in enumerate(list)
         d += open(j) do f
             sha256(f)
             end
-        p = Int64(round((i/n)*100))
-        in(p, 0:10:100) && (p != pz) && (pz = p; print("."))
+        update(p, i, n)
     end
     d
 end
@@ -150,7 +153,7 @@ function build_level_index(path, rate)
     m = length(path)
 
     # wav must be monochannel and fs==16000
-    pz = -1
+    p = indicator(10)
     for (i,j) in enumerate(a)
         try
             x, fs = wavread(j)
@@ -165,10 +168,7 @@ function build_level_index(path, rate)
         catch
             warn(j)
         end
-
-        p = Int64(round((i/n)*100))
-        in(p, 0:10:100) && (p != pz) && (pz = p; print("."))
-        
+        update(p, i, n)
     end
 
     # save level index to csv
@@ -373,7 +373,8 @@ function feature(specification, label, gain)
 
     # process each mixed to spectral domain
     srand(s["seed"])
-    ptz = -1
+    progress = indicator(10)
+
     for (i,j) in enumerate(keys(a))
         
         p = split(j[1:end-length(".wav")],"+")
@@ -394,35 +395,38 @@ function feature(specification, label, gain)
         x_noise = wavread(joinpath(s["noise_root"],p[2],p[3]) * ".wav")[1][:,1]
         x_speech = wavread(joinpath(s["speech_root"],p[4],p[5],p[6]) * ".wav")[1][:,1]
 
-        #g = 10^((tagspl-refspl)/20)
-        #g * refpk > 1 && (g = 1 / refpk; info("relax gain to avoid clipping $(refpk):$(refspl)->$(tagspl)(dB)"))
-        #r = g * repeat(r, outer=dup) #level speech to target level
         x_speech = g[j][1] .* repeat(x_speech, outer=speech_dup)
         x_noise .*= g[j][2]
         x_noise_ = 1e-7*randn(size(x_speech))
+
+        assert(length(a[j]) == noise_dup)
         for k in a[j]
             x_noise_[k[1]:k[2]] = x_noise
         end
         
-        #h5write(joinpath(s["mix_root"],s["hdf5"]), "$j/speech", x_speech)
-        #h5write(joinpath(s["mix_root"],s["hdf5"]), "$j/noise", x_noise_)
-        #h5write(joinpath(s["mix_root"],s["hdf5"]), "$j/mix", x_mix)
+        # for verification purpose
+        # h5write(joinpath(s["mix_root"],s["hdf5"]), "$j/speech", x_speech)
+        # h5write(joinpath(s["mix_root"],s["hdf5"]), "$j/noise", x_noise_)
+        # h5write(joinpath(s["mix_root"],s["hdf5"]), "$j/mix", x_mix)
+        # wavwrite([x r], i*"label",Fs=s["sample_rate"])
 
-        #wavwrite([x r], i*"label",Fs=s["sample_rate"])
         pxx_speech = power_spectrum(x_speech, param, m, window=win[s["feature"]["window"]])
         pxx_noise = power_spectrum(x_noise_, param, m, window=win[s["feature"]["window"]])
         pxx_mix = power_spectrum(x_mix, param, m, window=win[s["feature"]["window"]])
         
-        h5write(joinpath(s["mix_root"],s["hdf5"]), "$j/speech", transpose(log.(pxx_speech.+eps())))
-        h5write(joinpath(s["mix_root"],s["hdf5"]), "$j/noise", transpose(log.(pxx_noise.+eps())))
-        h5write(joinpath(s["mix_root"],s["hdf5"]), "$j/mix", transpose(log.(pxx_mix.+eps())))
-        # N x s["feature"]["frame_size"]/2+1 matrix
-
-        pt = Int64(round((i/length(a))*100))
-        in(pt, 0:10:100) && (pt != ptz) && (ptz = pt; print("."))
+        h5write(joinpath(s["mix_root"],s["hdf5"]), "$j/speech", log.(pxx_speech.+eps()))
+        h5write(joinpath(s["mix_root"],s["hdf5"]), "$j/noise", log.(pxx_noise.+eps()))
+        h5write(joinpath(s["mix_root"],s["hdf5"]), "$j/mix", log.(pxx_mix.+eps()))
+        # "frame_size"/2+1 by N matrix
+        update(progress, i, length(a))
     end
     info("feature written to $(joinpath(s["mix_root"],s["hdf5"]))")
 end
+
+
+
+
+
 
 
 # global variance:
@@ -439,11 +443,10 @@ function gstat(specification)
 
     # get global frame count
     n = zero(Int128)                            
-    ptz = -1
+    progress = indicator(10)
     for (i,j) in enumerate(names(fid))   
-        n += size(read(fid[j]["mix"]),1)        
-        pt = Int64(round(100 * (i/l)))
-        in(pt, 0:10:100) && (pt != ptz) && (ptz = pt; print("."))
+        n += size(read(fid[j]["mix"]), 2)        
+        update(progress, i, l)
     end
     info("global spectrum count: $n")
 
@@ -451,14 +454,13 @@ function gstat(specification)
     μ = zeros(Float64, m)
     μi = zeros(BigFloat, l, m)
 
-    ptz = -1
+    rewind(progress)
     for(i,j) in enumerate(names(fid))
         x = read(fid[j]["mix"])                 
         for k = 1:m
             μi[i,k] = sum_kbn(x[:,k])
         end
-        pt = Int64(round(100 * (i/l)))        
-        in(pt, 0:10:100) && (pt != ptz) && (ptz = pt; print("."))        
+        update(progress, i, l)
     end
     for k = 1:m
         μ[k] = Float64(sum_kbn(μi[:,k])/n)
@@ -535,44 +537,26 @@ function context(specification, partitions::Int64, specification_train)
         start = vcat(1, 1+fin[1:end-1])
         ptz = -1
         for j = 1:np
-            data[start[j]:fin[j],:] = sliding!(read(fid[groups[i*np+j]]["mix"]), radius, μ, σ)        
-            label[start[j]:fin[j],:] = (read(fid[groups[i*np+j]]["speech"]) .- (μ')) ./ (σ')
+            tmp = read(fid[groups[i*np+j]]["mix"])
+            tmp = (tmp.-(μ'))./(σ')
+            data[start[j]:fin[j],:] = sliding(tmp, radius)
+
+            tmp = read(fid[groups[i*np+j]]["speech"])
+            label[start[j]:fin[j],:] = (tmp.-(μ'))./(σ')
 
             # update progress
             pt = Int64(round(100 * (j/np)))
             in(pt, 0:10:100) && (pt != ptz) && (ptz = pt; print("."))
         end
         pathout = joinpath(s["mix_root"], "tensor-$i.h5")
-        h5write(pathout, "data", data)
-        h5write(pathout, "label", label)
+        h5write(pathout, "data", Float32.(data))
+        h5write(pathout, "label", Float32.(label))
         info("partition $i ok")
     end
 
     close(fid)
 end
 
-# x = L x 257 matrix
-# return y: L x (257*(neighbour*2+1+1))
-symm(i,r) = i-r:i+r
-function sliding!(x::Array{Float64,2}, r::Int64, μ::Array{Float64,1}, σ::Array{Float64,1})
-
-    # normalize
-    x = (x.-(μ'))./(σ')
-
-    # get sliding frame context
-    m, n = size(x)
-    head = repmat(x[1,:]', r, 1)
-    tail = repmat(x[end,:]', r, 1)
-    x = vcat(head, x, tail)
-
-    y = zeros(m,(2r+2)*n)
-    for i = 1:m
-        focus = x[symm(r+i,r),:]
-        nat = sum(focus,1)[1,:] / (2r+1)
-        y[i,:] = vec(hcat(transpose(focus),nat))
-    end
-    y
-end
 
 
 
