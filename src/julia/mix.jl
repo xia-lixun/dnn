@@ -95,7 +95,7 @@ end
 
 
 #generate template JSON file based on folder contents
-function specgen()
+function specification_gen()
     
     x = Array{Dict{String,Any},1}()
     a = Dict(
@@ -431,13 +431,14 @@ end
 
 # global variance:
 # remove old global.h5 and make new
-function gstat(specification)
+function statistics(specification)
 
     # read the specification for feature extraction
-    s = JSON.parsefile(specification) 
-    rm(joinpath(s["mix_root"],"global.h5"), force=true)
+    s = JSON.parsefile(specification)
+    pathstat = joinpath(s["mix_root"],"global.h5")
+    rm(pathstat, force=true)
+    m = div(s["feature"]["frame_size"], 2) + 1
 
-    m = div(s["feature"]["frame_size"], 2) + 1 # m = 257
     fid = h5open(joinpath(s["mix_root"],s["hdf5"]),"r")
     l = length(names(fid))
 
@@ -451,45 +452,43 @@ function gstat(specification)
     info("global spectrum count: $n")
 
     # get global mean log power spectrum
-    μ = zeros(Float64, m)
-    μi = zeros(BigFloat, l, m)
+    μ = zeros(m)
+    σ = zeros(m)
+    μi = zeros(BigFloat, m, l)
 
     rewind(progress)
     for(i,j) in enumerate(names(fid))
         x = read(fid[j]["mix"])                 
         for k = 1:m
-            μi[i,k] = sum_kbn(x[:,k])
+            μi[k,i] = sum_kbn(view(x,k,:))
         end
         update(progress, i, l)
     end
     for k = 1:m
-        μ[k] = Float64(sum_kbn(μi[:,k])/n)
+        μ[k] = sum_kbn(view(μi,k,:))/n
     end
     info("global spectrum μ (dimentionless): $(mean(μ))")
 
-
     # get global std for unit variance
-    σ = zeros(Float64, m)
     fill!(μi, zero(BigFloat))
-    ptz = -1
+    rewind(progress)
     for(i,j) in enumerate(names(fid))
         x = read(fid[j]["mix"])              
         for k = 1:m
-            μi[i,k] = sum_kbn((x[:,k]-μ[k]).^2)
+            μi[k,i] = sum_kbn((view(x,k,:)-μ[k]).^2)
         end
-        pt = Int64(round(100 * (i/l)))        
-        in(pt, 0:10:100) && (pt != ptz) && (ptz = pt; print("."))        
+        update(progress, i, l)
     end
     for k = 1:m
-        σ[k] = Float64(sqrt(sum_kbn(μi[:,k])/(n-1)))
+        σ[k] = sqrt(sum_kbn(view(μi,k,:))/(n-1))
     end
     info("global spectrum σ (dimentionless): $(mean(σ))")
 
-    h5write(joinpath(s["mix_root"],"global.h5"), "mu", μ)
-    h5write(joinpath(s["mix_root"],"global.h5"), "std", σ)
-    h5write(joinpath(s["mix_root"],"global.h5"), "frames", Int64(n))
+    h5write(pathstat, "mu", μ)
+    h5write(pathstat, "std", σ)
+    h5write(pathstat, "frames", Int64(n))
     assert(n < typemax(Int64))
-    info("global results written to $(joinpath(s["mix_root"],"global.h5"))")
+    info("global results written to $(pathstat)")
 
     close(fid)
 end
@@ -500,11 +499,11 @@ end
 #######line of pure graceful and joy#######
 # specification.json
 # partitions: number of .h5's as output
-function context(specification, partitions::Int64, specification_train)
+function tensor(specification, partitions::Int64, specification_train)
 
     # read the specification for feature extraction
     s = JSON.parsefile(specification) 
-    m = div(s["feature"]["frame_size"], 2) + 1 # m = 257
+    m = div(s["feature"]["frame_size"], 2) + 1
     radius = s["feature"]["frame_neighbour"]
     periph = (2radius+2) * m
 
@@ -527,26 +526,24 @@ function context(specification, partitions::Int64, specification_train)
         # find out the size of each partition
         nf = zeros(Int64, np)
         for j = 1:np
-            nf[j] = size(read(fid[groups[i*np+j]]["mix"]),1)
+            nf[j] = size(read(fid[groups[i*np+j]]["mix"]), 2)
         end  
-        data = zeros(sum(nf), periph)
-        label = zeros(sum(nf), m)
+        data = zeros(periph, sum(nf))
+        label = zeros(m, sum(nf))
 
         # fill in each partition with context data and nat data
         fin = cumsum(nf)
         start = vcat(1, 1+fin[1:end-1])
-        ptz = -1
+        progress = indicator(10)
+
         for j = 1:np
             tmp = read(fid[groups[i*np+j]]["mix"])
-            tmp = (tmp.-(μ'))./(σ')
-            data[start[j]:fin[j],:] = sliding(tmp, radius)
+            tmp = (tmp.-μ)./σ
+            data[:, start[j]:fin[j]] = sliding(tmp, radius)
 
             tmp = read(fid[groups[i*np+j]]["speech"])
-            label[start[j]:fin[j],:] = (tmp.-(μ'))./(σ')
-
-            # update progress
-            pt = Int64(round(100 * (j/np)))
-            in(pt, 0:10:100) && (pt != ptz) && (ptz = pt; print("."))
+            label[:, start[j]:fin[j]] = (tmp.-μ)./σ
+            update(progress, j, np)
         end
         pathout = joinpath(s["mix_root"], "tensor-$i.h5")
         h5write(pathout, "data", Float32.(data))
@@ -564,7 +561,8 @@ end
 
 
 
-function datagen()
+function main()
+
     valid_spec = "D:\\4-Workspace\\mix\\valid\\specification-2017-11-13T16-50-41-801.json"
     valid_lab = "D:\\4-Workspace\\mix\\valid\\label.json"
     valid_glob = "D:\\4-Workspace\\mix\\valid\\global.h5"
@@ -575,13 +573,13 @@ function datagen()
     train_glob = "D:\\4-Workspace\\mix\\train\\global.h5"
     train_gain = "D:\\4-Workspace\\mix\\train\\gain.json"
 
-    #mix(train_spec)                                  # generate mixed wav with labelings and gains
-    #feature(train_spec, train_lab, train_gain)       # extract plain features, to valid.h5/train.h5
-    #gstat(train_spec)                                # find out the global stats: mean/std/total frames
-    #context(train_spec, 10, train_spec)                           # convert plain features to tensor input    
+    mix(train_spec)                                  # generate mixed wav with labelings and gains
+    feature(train_spec, train_lab, train_gain)       # extract plain features, to valid.h5/train.h5
+    statistics(train_spec)                                # find out the global stats: mean/std/total frames
+    tensor(train_spec, 10, train_spec)                           # convert plain features to tensor input    
 
-    mix(valid_spec)                                  # generate mixed wav with labelings and gains
-    feature(valid_spec, valid_lab, valid_gain)       # extract plain features, to valid.h5/train.h5
-    gstat(valid_spec)                                # find out the global stats: mean/std/total frames
-    context(valid_spec, 1, train_spec)                           # convert plain features to tensor input
+    # mix(valid_spec)                                  # generate mixed wav with labelings and gains
+    # feature(valid_spec, valid_lab, valid_gain)       # extract plain features, to valid.h5/train.h5
+    # statistics(valid_spec)                                # find out the global stats: mean/std/total frames
+    # tensor(valid_spec, 1, train_spec)                           # convert plain features to tensor input
 end

@@ -142,8 +142,8 @@ part_num_total = 10
 # note: in h5 data are in N x 257/2056 format
 #       transpose to maintain the format unchanged for tf
 fid_valid = h5py.File("D:\\4-Workspace\\mix\\valid\\tensor-0.h5")
-t_valid_data = np.array(fid_valid["/data"], dtype='float32').transpose()
-t_valid_label = np.array(fid_valid["/label"], dtype='float32').transpose()
+t_valid_data = np.array(fid_valid["/data"], dtype='float32')
+t_valid_label = np.array(fid_valid["/label"], dtype='float32')
 del fid_valid
 
 
@@ -180,8 +180,8 @@ for epoch in range(n_epochs):
             pass
 
         data_part = h5py.File('D:\\4-Workspace\\mix\\train\\tensor-' + str(part_num) + '.h5')
-        _data = np.array(data_part["/data"], dtype='float32').transpose()
-        _label = np.array(data_part["/label"], dtype='float32').transpose()
+        _data = np.array(data_part["/data"], dtype='float32')
+        _label = np.array(data_part["/label"], dtype='float32')
         del data_part
 
         _data, _label = shuffle(_data, _label)
