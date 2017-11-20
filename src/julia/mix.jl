@@ -114,7 +114,7 @@ function specification_gen()
         "build_noiselevel_index" => true,
         "noise_class" => x,
 
-        "feature" => Dict("frame_size"=>512,"step_size"=>128,"window"=>"Hamming","frame_neighbour"=>6,"frame_noise_est"=>7)
+        "feature" => Dict("frame_size"=>512,"step_size"=>128,"window"=>"Hamming","frame_neighbour"=>5,"nat_size"=>7)
         )
     for i in flist(a["noise_root"])
         push!(x, Dict("name"=>i,"type"=>"stationary|nonstationary|impulsive","percent"=>0.0))
@@ -189,7 +189,7 @@ function mix(specification)
     n = s["sample_space"]          #17
     snr = s["mix_snr"]          #[-20.0, -10.0, 0.0, 10.0, 20.0]
     spl = s["speech_level"]     #[-22.0, -32.0, -42.0]
-    mr = s["mix_range"]         #[0.1, 0.6]
+    mr = s["mix_range"]         #[0.1, 0.9]
 
     # remove existing wav file in the mix folder
     clean = flist(s["mix_root"], t=".wav")
@@ -362,7 +362,8 @@ function feature(specification, label, gain)
     assert(s["sample_space"] == length(a))
     
     # remove existing .h5 training/valid/test data
-    rm(joinpath(s["mix_root"],s["hdf5"]), force=true)
+    output = joinpath(s["mix_root"],s["hdf5"])
+    rm(output, force=true)
 
 
     # feature specification
@@ -405,22 +406,22 @@ function feature(specification, label, gain)
         end
         
         # for verification purpose
-        # h5write(joinpath(s["mix_root"],s["hdf5"]), "$j/speech", x_speech)
-        # h5write(joinpath(s["mix_root"],s["hdf5"]), "$j/noise", x_noise_)
-        # h5write(joinpath(s["mix_root"],s["hdf5"]), "$j/mix", x_mix)
+        # h5write(output, "$j/speech", x_speech)
+        # h5write(output, "$j/noise", x_noise_)
+        # h5write(output, "$j/mix", x_mix)
         # wavwrite([x r], i*"label",Fs=s["sample_rate"])
-
-        pxx_speech = power_spectrum(x_speech, param, m, window=win[s["feature"]["window"]])
-        pxx_noise = power_spectrum(x_noise_, param, m, window=win[s["feature"]["window"]])
-        pxx_mix = power_spectrum(x_mix, param, m, window=win[s["feature"]["window"]])
+        f = win[s["feature"]["window"]]
+        pxx_speech, lu = power_spectrum(x_speech, param, m, window=f)
+        pxx_noise, lu = power_spectrum(x_noise_, param, m, window=f)
+        pxx_mix, lu = power_spectrum(x_mix, param, m, window=f)
         
-        h5write(joinpath(s["mix_root"],s["hdf5"]), "$j/speech", log.(pxx_speech.+eps()))
-        h5write(joinpath(s["mix_root"],s["hdf5"]), "$j/noise", log.(pxx_noise.+eps()))
-        h5write(joinpath(s["mix_root"],s["hdf5"]), "$j/mix", log.(pxx_mix.+eps()))
+        h5write(output, "$j/speech", log.(pxx_speech.+eps()))
+        h5write(output, "$j/noise", log.(pxx_noise.+eps()))
+        h5write(output, "$j/mix", log.(pxx_mix.+eps()))
         # "frame_size"/2+1 by N matrix
         update(progress, i, length(a))
     end
-    info("feature written to $(joinpath(s["mix_root"],s["hdf5"]))")
+    info("feature written to $(output)")
 end
 
 
@@ -505,6 +506,7 @@ function tensor(specification, partitions::Int64, specification_train)
     s = JSON.parsefile(specification) 
     m = div(s["feature"]["frame_size"], 2) + 1
     radius = s["feature"]["frame_neighbour"]
+    nat = s["feature"]["nat_size"]
     periph = (2radius+2) * m
 
     # extract global stat info
@@ -539,7 +541,7 @@ function tensor(specification, partitions::Int64, specification_train)
         for j = 1:np
             tmp = read(fid[groups[i*np+j]]["mix"])
             tmp = (tmp.-μ)./σ
-            data[:, start[j]:fin[j]] = sliding(tmp, radius)
+            data[:, start[j]:fin[j]] = sliding(tmp, radius, nat)
 
             tmp = read(fid[groups[i*np+j]]["speech"])
             label[:, start[j]:fin[j]] = (tmp.-μ)./σ
@@ -565,21 +567,19 @@ function main()
 
     valid_spec = "D:\\4-Workspace\\mix\\valid\\specification-2017-11-13T16-50-41-801.json"
     valid_lab = "D:\\4-Workspace\\mix\\valid\\label.json"
-    valid_glob = "D:\\4-Workspace\\mix\\valid\\global.h5"
     valid_gain = "D:\\4-Workspace\\mix\\valid\\gain.json"
 
     train_spec = "D:\\4-Workspace\\mix\\train\\specification-2017-11-13T16-50-41-801.json"
     train_lab = "D:\\4-Workspace\\mix\\train\\label.json"
-    train_glob = "D:\\4-Workspace\\mix\\train\\global.h5"
     train_gain = "D:\\4-Workspace\\mix\\train\\gain.json"
 
-    mix(train_spec)                                  # generate mixed wav with labelings and gains
-    feature(train_spec, train_lab, train_gain)       # extract plain features, to valid.h5/train.h5
-    statistics(train_spec)                                # find out the global stats: mean/std/total frames
-    tensor(train_spec, 10, train_spec)                           # convert plain features to tensor input    
+    # mix(train_spec)                                  # generate mixed wav with labelings and gains
+    # feature(train_spec, train_lab, train_gain)       # extract plain features, to valid.h5/train.h5
+    # statistics(train_spec)                                # find out the global stats: mean/std/total frames
+    # tensor(train_spec, 10, train_spec)                           # convert plain features to tensor input    
 
-    # mix(valid_spec)                                  # generate mixed wav with labelings and gains
-    # feature(valid_spec, valid_lab, valid_gain)       # extract plain features, to valid.h5/train.h5
-    # statistics(valid_spec)                                # find out the global stats: mean/std/total frames
-    # tensor(valid_spec, 1, train_spec)                           # convert plain features to tensor input
+    mix(valid_spec)                                  # generate mixed wav with labelings and gains
+    feature(valid_spec, valid_lab, valid_gain)       # extract plain features, to valid.h5/train.h5
+    statistics(valid_spec)                                # find out the global stats: mean/std/total frames
+    tensor(valid_spec, 1, train_spec)                           # convert plain features to tensor input
 end

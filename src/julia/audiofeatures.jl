@@ -88,9 +88,12 @@ end
 # FrameInSecond(fs, block, update) = Frame1D{Int64}(fs, floor(block * fs), floor(update * fs), 0)
 
 
-
-# this is a private member function
-function tile(x::Array{T,1}, p::Frame1D{U}; zero_init=false, zero_append=false) where {T <: AbstractFloat, U <: Integer}
+# extend array x with prefix/appending zeros for frame slicing
+# 1. this is an utility function used by get_frames()
+# 2. new data are allocated, so origianl x is untouched.
+# 3. zero_init = true: the first frame will have zeros of length nfft-nhop
+# 4. zero_append = true: the last frame will partially contain data of original x
+function tile(x::AbstractArray{T,1}, p::Frame1D{U}; zero_init=false, zero_append=false) where {T <: AbstractFloat, U <: Integer}
     
     zero_init && (x = [zeros(T, p.overlap); x])                                     # zero padding to the front for defined init state
     length(x) < p.block && error("signal length must be at least one block!")       # detect if length of x is less than block size
@@ -117,8 +120,8 @@ end
 # example:
 # x = collect(1.0:100.0)
 # p = Frame1D{Int64}(8000, 17, 7.0, 0)
-# y = get_frames(x, p)
-function get_frames(x::Array{T,1}, p::Frame1D{U}; window=ones, zero_init=false, zero_append=false) where {T <: AbstractFloat, U <: Integer}
+# y,h = get_frames(x, p) where h is the unfold length in time domain
+function get_frames(x::AbstractArray{T,1}, p::Frame1D{U}; window=ones, zero_init=false, zero_append=false) where {T <: AbstractFloat, U <: Integer}
     
     x, n = tile(x, p, zero_init = zero_init, zero_append = zero_append)
     
@@ -129,14 +132,15 @@ function get_frames(x::Array{T,1}, p::Frame1D{U}; window=ones, zero_init=false, 
         y[:,i] = ω .* x[h+1:h+p.block]
         h += p.update
     end
-    y
+    # h is the total hopping size, +(p.block - p.update) for total non-overlapping length
+    (y,h+(p.block-p.update))
 end
 
 # example:
 # x = collect(1.0:100.0)
 # p = Frame1D{Int64}(8000, 17, 7.0, 0)
-# y = spectrogram(x, p, nfft, window=hamming, zero_init=true, zero_append=true)
-function spectrogram(x::Array{T,1}, p::Frame1D{U}, nfft::U; window=ones, zero_init=false, zero_append=false) where {T <: AbstractFloat, U <: Integer}
+# y,h = spectrogram(x, p, nfft, window=hamming, zero_init=true, zero_append=true) where h is the unfold length in time domain
+function spectrogram(x::AbstractArray{T,1}, p::Frame1D{U}, nfft::U; window=ones, zero_init=false, zero_append=false) where {T <: AbstractFloat, U <: Integer}
     
     nfft < p.block && error("nfft length must be greater than or equal to block/frame length")
     x, n = tile(x, p, zero_init = zero_init, zero_append = zero_append)
@@ -149,7 +153,7 @@ function spectrogram(x::Array{T,1}, p::Frame1D{U}, nfft::U; window=ones, zero_in
         𝕏[:,i] = P * ( ω .* [x[h+1:h+p.block]; zeros(T,nfft-p.block)] )
         h += p.update
     end
-    𝕏
+    (𝕏,h+(p.block-p.update))
 end
 
 
@@ -158,8 +162,8 @@ energy(v) = x.^2
 intensity(v) = abs.(v)
 zero_crossing_rate(v) = floor.((abs.(diff(sign.(v)))) ./ 2)
 
-function short_term(f, x::Array{T,1}, p::Frame1D{U}; zero_init=false, zero_append=false) where {T <: AbstractFloat, U <: Integer}
-    frames = get_frames(x, p, zero_init=zero_init, zero_append=zero_append)
+function short_term(f, x::AbstractArray{T,1}, p::Frame1D{U}; zero_init=false, zero_append=false) where {T <: AbstractFloat, U <: Integer}
+    frames, lu = get_frames(x, p, zero_init=zero_init, zero_append=zero_append)
     n = size(frames,2)
     ste = zeros(T, n)
     for i = 1:n
@@ -176,7 +180,7 @@ mel_to_hz(mel) = 700 * (10 .^ (mel * 1.0 / 2595) - 1)
 
 # calculate power spectrum of 1-D array on a frame basis
 # note that T=Float16 may not be well supported by FFTW backend
-function power_spectrum(x::Array{T,1}, p::Frame1D{U}, nfft::U; window=ones, zero_init=false, zero_append=false) where {T <: AbstractFloat, U <: Integer}
+function power_spectrum(x::AbstractArray{T,1}, p::Frame1D{U}, nfft::U; window=ones, zero_init=false, zero_append=false) where {T <: AbstractFloat, U <: Integer}
     
     nfft < p.block && error("nfft length must be greater than or equal to block/frame length")
     x, n = tile(x, p, zero_init = zero_init, zero_append = zero_append)
@@ -193,7 +197,7 @@ function power_spectrum(x::Array{T,1}, p::Frame1D{U}, nfft::U; window=ones, zero
         ℙ[:,i] = ρ * ((abs.(ξ[1:m])).^2)
         h += p.update
     end
-    ℙ
+    (ℙ,h+(p.block-p.update))
 end
 
 # calculate filter banks
@@ -227,7 +231,7 @@ function filter_banks(T, rate::U, nfft::U; filt_num=26, fl=0, fh=div(rate,2)) wh
 end
 
 
-function filter_bank_energy(x::Array{T,1}, p::Frame1D{U}, nfft::U; window=ones, zero_init=false, zero_append=false, filt_num=26, fl=0, fh=div(p.rate,2), use_log=false) where {T <: AbstractFloat, U <: Integer}
+function filter_bank_energy(x::AbstractArray{T,1}, p::Frame1D{U}, nfft::U; window=ones, zero_init=false, zero_append=false, filt_num=26, fl=0, fh=div(p.rate,2), use_log=false) where {T <: AbstractFloat, U <: Integer}
 
     ℙ = power_spectrum(x, p, nfft, window=window, zero_init=zero_init, zero_append=zero_append)
     𝔽 = filter_banks(T, p.rate, nfft, filt_num=filt_num, fl=fl, fh=fh)
@@ -240,7 +244,7 @@ end
 
 # T could be AbstractFloat for best performance
 # but defined as Real for completeness.
-function local_maxima(x::Array{T,1}) where {T <: Real}
+function local_maxima(x::AbstractArray{T,1}) where {T <: Real}
     
     gtl = [false; x[2:end] .> x[1:end-1]]
     gtu = [x[1:end-1] .>= x[2:end]; false]
