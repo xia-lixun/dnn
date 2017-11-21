@@ -120,7 +120,7 @@ function cola_processing(specification::String, wav::String; model::String = "")
         nfft2 = div(nfft,2)+1
         ℙ = ρ.*(abs.(view(𝕏,1:nfft2,:))).^2
         psd_processing!(model, ℙ, s_r, s_t, μ, σ)
-        ℙ .= sqrt.(ℙ)./ρ
+        ℙ .= sqrt.(ℙ)./sqrt(ρ)
         ℙ = vcat(ℙ, ℙ[end-1:-1:2,:])
         𝕏 = ifft(ℙ .* exp.(𝚽 .* im), 1)
         ImagAssert = sum(imag(𝕏))

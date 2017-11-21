@@ -563,7 +563,7 @@ end
 
 
 
-function main()
+function mixup()
 
     valid_spec = "D:\\4-Workspace\\mix\\valid\\specification-2017-11-13T16-50-41-801.json"
     valid_lab = "D:\\4-Workspace\\mix\\valid\\label.json"
@@ -581,5 +581,16 @@ function main()
     mix(valid_spec)                                  # generate mixed wav with labelings and gains
     feature(valid_spec, valid_lab, valid_gain)       # extract plain features, to valid.h5/train.h5
     statistics(valid_spec)                                # find out the global stats: mean/std/total frames
-    tensor(valid_spec, 1, train_spec)                           # convert plain features to tensor input
+    tensor(valid_spec, 10, train_spec)                           # convert plain features to tensor input
+end
+
+
+
+
+function cola_process_dataset(specification::String, dataset::String; model::String = "")
+
+    dset = flist(dataset, t=".wav")
+    for (i,j) in enumerate(dset)
+        cola_processing(specification, j, model=model)
+    end
 end

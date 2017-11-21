@@ -103,13 +103,13 @@ class Dense:
 
 
 layers = [
-    Dense(257*8, 2048, tf.nn.sigmoid),
+    Dense(257*12, 2048, tf.nn.sigmoid),
     Dense(2048, 2048, tf.nn.sigmoid),
     Dense(2048, 2048, tf.nn.sigmoid),
     Dense(2048, 257)
 ]
 keep_prob = tf.placeholder(tf.float32)
-x = tf.placeholder(tf.float32, [None, 257*8])
+x = tf.placeholder(tf.float32, [None, 257*12])
 t = tf.placeholder(tf.float32, [None, 257])
 
 def f_props(layers, x):
@@ -132,19 +132,15 @@ sess.run(init)
 
 n_epochs = 50
 batch_size = 128
-part_num_total = 10
+part_num_train = 10
+part_num_valid = 10
 
 
 ##########################
 #########DATA#############
 ##########################
 
-# note: in h5 data are in N x 257/2056 format
-#       transpose to maintain the format unchanged for tf
-fid_valid = h5py.File("D:\\4-Workspace\\mix\\valid\\tensor-0.h5")
-t_valid_data = np.array(fid_valid["/data"], dtype='float32')
-t_valid_label = np.array(fid_valid["/label"], dtype='float32')
-del fid_valid
+
 
 
 
@@ -152,10 +148,28 @@ del fid_valid
 #########PROCESS##########
 ##########################
 print("FineTuning begin")
-Cost_validation = sess.run(cost_fine, feed_dict={x: t_valid_data, t: t_valid_label, keep_prob: 1.0})
-print('EPOCH: 0, Validation cost: %.3f ' % (Cost_validation))
 cost_valid_best = 1000000
 
+
+Cost_validation = 0.0
+for part_num_ in range(part_num_valid):
+    # note: in h5 data are in N x 257/2056 format	
+    #       transpose to maintain the format unchanged for tf
+    fid_valid = h5py.File('/home/coc/4-Workspace/valid/tensor-' + str(part_num_) + '.h5')
+    t_valid_data = np.array(fid_valid["/data"], dtype='float32')
+    t_valid_label = np.array(fid_valid["/label"], dtype='float32')
+    del fid_valid
+    
+    Cost_validation = Cost_validation + sess.run(cost_fine, feed_dict={x: t_valid_data, t: t_valid_label, keep_prob: 1.0})
+    del t_valid_data
+    del t_valid_label
+Cost_validation = Cost_validation / part_num_valid
+print('EPOCH: 0, Validation cost: %.3f ' % (Cost_validation))
+
+
+
+
+# training starts here
 for epoch in range(n_epochs):
     mt = 0.9
     lrate = 0.001
@@ -170,7 +184,8 @@ for epoch in range(n_epochs):
 
 
     time_start = time.time()
-    part_num_list = shuffle(range(part_num_total))
+    part_num_list = shuffle(range(part_num_train))
+
     for part_num in part_num_list:
         try:
             del data_part
@@ -179,7 +194,7 @@ for epoch in range(n_epochs):
         except:
             pass
 
-        data_part = h5py.File('D:\\4-Workspace\\mix\\train\\tensor-' + str(part_num) + '.h5')
+        data_part = h5py.File('/home/coc/4-Workspace/train/tensor-' + str(part_num) + '.h5')
         _data = np.array(data_part["/data"], dtype='float32')
         _label = np.array(data_part["/label"], dtype='float32')
         del data_part
@@ -193,7 +208,21 @@ for epoch in range(n_epochs):
             sess.run(train_fine, feed_dict={x: _data[start:end], t: _label[start:end], keep_prob: 0.8, lrate_p: lrate, mt_p: mt})
         print('part %i finished'%(part_num))
 
-    Cost_validation = sess.run(cost_fine, feed_dict={x: t_valid_data, t: t_valid_label, keep_prob: 1.0})
+    #Cost_validation = sess.run(cost_fine, feed_dict={x: t_valid_data, t: t_valid_label, keep_prob: 1.0})
+    Cost_validation = 0.0
+    for part_num_ in range(part_num_valid):
+        # note: in h5 data are in N x 257/2056 format	
+        #       transpose to maintain the format unchanged for tf
+        fid_valid = h5py.File('/home/coc/4-Workspace/valid/tensor-' + str(part_num_) + '.h5')
+        t_valid_data = np.array(fid_valid["/data"], dtype='float32')
+        t_valid_label = np.array(fid_valid["/label"], dtype='float32')
+        del fid_valid
+    
+        Cost_validation = Cost_validation + sess.run(cost_fine, feed_dict={x: t_valid_data, t: t_valid_label, keep_prob: 1.0})
+        del t_valid_data
+        del t_valid_label
+    Cost_validation = Cost_validation / part_num_valid
+
     time_end = time.time()
     print('EPOCH: %i, Validation cost: %.3f ' % (epoch + 1, Cost_validation))
     print('Elapsed time for one epoch is %.3f' % (time_end - time_start))
@@ -211,16 +240,14 @@ for epoch in range(n_epochs):
         save_dict['W4'] = sess.run(layers[3].W)
         save_dict['b4'] = sess.run(layers[3].b)
 
-        MATFILE = 'D:\\4-Workspace\\mix\\train\\specification-2017-11-13T16-50-41-801.mat'
+        MATFILE = '/home/coc/4-Workspace/train/specification-2017-11-13T16-50-41-801.mat'
         scio.savemat(MATFILE, save_dict)
         cost_valid_best = Cost_validation
         print('Model in EPOCH:%d is saved' % (epoch + 1))
         #LOG.write('Model in EPOCH:%d is saved' % (epoch + 1))
-    saver.save(sess, 'D:\\4-Workspace\\mix\\train\\specification-2017-11-13T16-50-41-801.tf')
+    saver.save(sess, '/home/coc/4-Workspace/train/specification-2017-11-13T16-50-41-801.tf')
 
 #LOG.close()
-del t_valid_data
-del t_valid_label
 del _data
 del _label
 sess.close()
