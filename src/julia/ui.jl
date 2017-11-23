@@ -1,9 +1,12 @@
-# indication dutilities
-mutable struct indicator
+module UI
+
+
+
+mutable struct Progress
     pph::Int64
     scaling::UnitRange{Int64}
 
-    function indicator(portions)
+    function Progress(portions)
         pph_v::Int128 = 0
         scale_v::UnitRange{Int64} = 1:portions
         new(pph_v, scale_v)
@@ -11,13 +14,21 @@ mutable struct indicator
 end
 
 
-function rewind(t::indicator)
+function rewind(t::Progress)
     t.pph = 0
+    nothing
 end
 
-function update(t::indicator, i, n)
+function update(t::Progress, i, n)
+    
     pp = sum(i .>= n * (t.scaling/t.scaling[end]))
     delta = pp-t.pph
     delta > 0 && print(repeat(".", delta))
     t.pph = pp
+    nothing
+end
+
+
+
+# module
 end

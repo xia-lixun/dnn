@@ -1,14 +1,21 @@
-using MAT
-using HDF5
-using JSON
-using WAV
-
-include("indicator.jl")
-include("audiofeatures.jl")
+module FORWARD
+# forward propagate through the neural net
+# decomposition/reconstrauction of the data under validation and test
 
 
 
-struct tf{T <: AbstractFloat}
+import MAT
+import HDF5
+import JSON
+import WAV
+
+include("ui.jl")
+include("feature.jl")
+
+
+
+# tensorflow nn parameters
+struct TF{T <: AbstractFloat}
 
     w::Array{Array{T,2},1}  # weights, w[1] is not used
     b::Array{Array{T,1},1}  # biases, b[1] is not used
@@ -16,8 +23,8 @@ struct tf{T <: AbstractFloat}
     width_i::Int64
     width_o::Int64
 
-    function tf{T}(model::String) where T <: AbstractFloat
-        nn = matread(model)
+    function TF{T}(model::String) where T <: AbstractFloat
+        nn = MAT.matread(model)
         w = Array{Array{T,2},1}()
         b = Array{Array{T,1},1}()
 
@@ -35,25 +42,24 @@ struct tf{T <: AbstractFloat}
 end
 
 
-sigmoid(x::T) where T <: AbstractFloat = one(T) / (one(T) + exp(-x))
 
 
 # Propagate the input data matrix through neural net
 # 1. x is column major, i.e. each column is an input vector to the net 
-function forward(model, x::AbstractArray{T,2}) where T <: AbstractFloat
+function feedforward(model, x::AbstractArray{T,2}) where T <: AbstractFloat
     
-    nn = tf{Float32}(model)
+    nn = TF{Float32}(model)
     n = size(x,2)
     y = zeros(T, nn.width_o, n)
 
-    p = indicator(10)
+    p = UI.Progress(10)
     for i = 1:n
-        a = sigmoid.(nn.w[1] * view(x,:,i) .+ nn.b[1])
+        a = FEATURE.sigmoid.(nn.w[1] * view(x,:,i) .+ nn.b[1])
         for j = 2 : nn.L-1
-            a .= sigmoid.(nn.w[j] * a .+ nn.b[j])
+            a .= FEATURE.sigmoid.(nn.w[j] * a .+ nn.b[j])
         end
         y[:,i] .= nn.w[nn.L] * a .+ nn.b[nn.L]
-        update(p, i, n)
+        UI.update(p, i, n)
     end
     info("nn feed forward done.")
     y
@@ -70,9 +76,9 @@ function psd_processing!(model::String,
                          μ::AbstractArray{T,1}, σ::AbstractArray{T,1}) where T <: AbstractFloat
     x .= log.(x .+ eps())
     x .= (x .- μ) ./ σ
-    y = sliding(x, r, t)
-    nn = tf{Float32}(model)
-    x .= forward(nn, y) .* σ .+ μ
+    y = FEATURE.sliding(x, r, t)
+    nn = TF{Float32}(model)
+    x .= feedforward(nn, y) .* σ .+ μ
     x .= exp.(x)
 end
 
@@ -86,7 +92,7 @@ function cola_processing(specification::String, wav::String; model::String = "")
     s_r = s["feature"]["frame_neighbour"]
     s_t = s["feature"]["nat_size"]
     s_fs = s["sample_rate"]
-    s_win = Dict("Hamming"=>hamming, "Hann"=>hann)
+    s_win = Dict("Hamming"=>FEATURE.hamming, "Hann"=>FEATURE.hann)
 
     # get global mu and std
     stat = joinpath(s["mix_root"], "global.h5")
@@ -94,17 +100,17 @@ function cola_processing(specification::String, wav::String; model::String = "")
     σ = Float32.(h5read(stat, "std"))
 
     # get input data
-    x, fs = wavread(wav)
+    x, fs = WAV.wavread(wav)
     assert(fs == typeof(fs)(s_fs))
     x = Float32.(x)
     
     # convert to frequency domain
-    param = Frame1D{Int64}(s_fs, s_frame, s_hop, 0)
+    param = FEATURE.Frame1D{Int64}(s_fs, s_frame, s_hop, 0)
     nfft = s_frame
     ρ = Float32(1 / nfft)
-    _cola = s_hop / sum(hamming(Float32, nfft))
+    _cola = s_hop / sum(FEATURE.hamming(Float32, nfft))
     
-    𝕏, lu = spectrogram(view(x,:,1), param, nfft, window=s_win[s["feature"]["window"]])
+    𝕏, lu = FEATURE.spectrogram(view(x,:,1), param, nfft, window=s_win[s["feature"]["window"]])
     m = size(𝕏, 2)
     y = zeros(Float32, lu)
 
@@ -130,53 +136,11 @@ function cola_processing(specification::String, wav::String; model::String = "")
     for k = 0:m-1
         y[k*s_hop+1 : k*s_hop+nfft] .+= 𝕏[:,k+1]
     end
-    wavwrite(y, wav[1:end-4]*"-processed.wav", Fs=s_fs)
+    WAV.wavwrite(y, wav[1:end-4]*"-processed.wav", Fs=s_fs)
     ImagAssert
 end
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-# Get frame context from spectrogram x with radius r
-# 1. x must be col major, i.e. each col is a spectrum frame for example, 257 x L matrix
-# 2. y will be (257*(neighbour*2+1+nat)) x L
-# 3. todo: remove allocations for better performance
-symm(i,r) = i-r:i+r
-
-# r: radius
-# t: noise estimation frames
-function sliding(x::Array{T,2}, r::Int64, t::Int64) where T <: AbstractFloat
-
-    m, n = size(x)
-    head = repmat(x[:,1], 1, r)
-    tail = repmat(x[:,end], 1, r)
-    x = hcat(head, x, tail)
-    y = zeros((2r+2)*m, n)
-
-    for i = 1:n
-        focus = view(x,:,symm(r+i,r))
-        nat = sum(view(focus,:,1:t), 2) / t
-        y[:,i] = vec(hcat(focus,nat))
-    end
-    y
+# module
 end
-
-
-
-
-
-
-
-

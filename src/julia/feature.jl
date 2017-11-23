@@ -1,3 +1,6 @@
+module FEATURE
+
+
 
 
 AWEIGHT_48kHz_BA = [0.234301792299513 -0.468603584599025 -0.234301792299515 0.937207169198055 -0.234301792299515 -0.468603584599025 0.234301792299512;
@@ -40,6 +43,9 @@ function tf_filter(B, A, x)
     end
     y
 end
+
+
+
 
 
 # n_update  (shift samples)
@@ -157,6 +163,8 @@ function spectrogram(x::AbstractArray{T,1}, p::Frame1D{U}, nfft::U; window=ones,
 end
 
 
+
+
 # v: indicates vector <: AbstractFloat
 energy(v) = x.^2
 intensity(v) = abs.(v)
@@ -250,4 +258,46 @@ function local_maxima(x::AbstractArray{T,1}) where {T <: Real}
     gtu = [x[1:end-1] .>= x[2:end]; false]
     imax = gtl .& gtu
     # return as BitArray mask of true or false
+end
+
+
+
+
+
+
+# Get frame context from spectrogram x with radius r
+# 1. x must be col major, i.e. each col is a spectrum frame for example, 257 x L matrix
+# 2. y will be (257*(neighbour*2+1+nat)) x L
+# 3. todo: remove allocations for better performance
+symm(i,r) = i-r:i+r
+
+# r: radius
+# t: noise estimation frames
+function sliding(x::Array{T,2}, r::Int64, t::Int64) where T <: AbstractFloat
+
+    m, n = size(x)
+    head = repmat(x[:,1], 1, r)
+    tail = repmat(x[:,end], 1, r)
+    x = hcat(head, x, tail)
+    y = zeros((2r+2)*m, n)
+
+    for i = 1:n
+        focus = view(x,:,symm(r+i,r))
+        nat = sum(view(focus,:,1:t), 2) / t
+        y[:,i] = vec(hcat(focus,nat))
+    end
+    y
+end
+
+
+
+sigmoid(x::T) where T <: AbstractFloat = one(T) / (one(T) + exp(-x))
+rms(x,dim) = sqrt.(sum((x.-mean(x,dim)).^2,dim)/size(x,dim))
+rms(x) = sqrt(sum((x-mean(x)).^2)/length(x))
+
+
+
+
+
+# module
 end
