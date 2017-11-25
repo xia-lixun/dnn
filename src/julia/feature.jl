@@ -52,23 +52,29 @@ end
 # n_overlap (overlapping samples)
 # n_block   (block size)
 
-function hamming(T, n)
+function hamming(T, n; flag="")
+
+    lowercase(flag) == "periodic" && (n += 1)
     ω = Array{T,1}(n)
     α = T(0.54)
     β = 1 - α
     for i = 0:n-1
         ω[i+1] = α - β * T(cos(2π * i / (n-1)))
     end
+    lowercase(flag) == "periodic" && (return ω[1:end-1])
     ω
 end
 
-function hann(T, n)
+function hann(T, n; flag="")
+
+    lowercase(flag) == "periodic" && (n += 1)
     ω = Array{T,1}(n)
     α = T(0.5)
     β = 1 - α
     for i = 0:n-1
         ω[i+1] = α - β * T(cos(2π * i / (n-1)))
     end
+    lowercase(flag) == "periodic" && (return ω[1:end-1])
     ω
 end
 
@@ -150,13 +156,15 @@ function spectrogram(x::AbstractArray{T,1}, p::Frame1D{U}, nfft::U; window=ones,
     
     nfft < p.block && error("nfft length must be greater than or equal to block/frame length")
     x, n = tile(x, p, zero_init = zero_init, zero_append = zero_append)
+    m = div(nfft,2)+1
 
     ω = window(T, nfft)
     P = plan_fft(ω)
-    𝕏 = zeros(Complex{T}, nfft, n)
+    𝕏 = zeros(Complex{T}, m, n)
     h = 0
     for i = 1:n
-        𝕏[:,i] = P * ( ω .* [x[h+1:h+p.block]; zeros(T,nfft-p.block)] )
+        ξ = P * ( ω .* [x[h+1:h+p.block]; zeros(T,nfft-p.block)] )
+        𝕏[:,i] = ξ[1:m]
         h += p.update
     end
     (𝕏,h+(p.block-p.update))
@@ -207,6 +215,8 @@ function power_spectrum(x::AbstractArray{T,1}, p::Frame1D{U}, nfft::U; window=on
     end
     (ℙ,h+(p.block-p.update))
 end
+
+
 
 # calculate filter banks
 function filter_banks(T, rate::U, nfft::U; filt_num=26, fl=0, fh=div(rate,2)) where {U <: Integer}

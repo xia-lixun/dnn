@@ -12,6 +12,7 @@ include("feature.jl")
 include("forward.jl")
 include("ui.jl")
 include("data.jl")
+include("stft2.jl")
 
 
 
@@ -39,7 +40,7 @@ function generate_specification()
         "seed" => 1234,
 
         "feature" => Dict("frame_length"=>512, "hop_length"=>128, "frame_context"=>11, "nat_frames"=>7),
-        "psd" => "train.h5",
+        "spectrum" => "train.h5",
         "noise_class" => x
         )
     
@@ -132,10 +133,10 @@ end
 
 
 # mix procedure implements the specification
-function mix(specification::String)
+function mix(specification_json::String)
 
     # read the specification for mixing task
-    s = JSON.parsefile(specification)
+    s = JSON.parsefile(specification_json)
 
     fs::Int64 = s["sample_rate"]                      # 16000
     n::Int64 = s["sample_space"]                      # 17
@@ -296,14 +297,15 @@ function mix(specification::String)
                 # case when voice is too short for the noise, extend the voice, here we don't do cyclic extension
                 # with voice, instead we scatter multiple copies of voice among entire nosie
                 voice_len_tt = Int64(round(noise_len * vntr))
-                λ = voice_len_tt / voice_len   # 3.3
-                λr = floor(λ)                  # 3.0
-                λ1 = λr - 1.0                  # 2.0
-                λ2 = λ - λr + 1.0              # 1.3
+                λ = voice_len_tt / voice_len   # 3.3|3.0
+                λr = floor(λ)                  # 3.0|3.0
+                λ1 = λr - 1.0                  # 2.0|2.0
+                λ2 = λ - λr + 1.0              # 1.3|1.0
                 
                 voice_len_extend = Int64(round(voice_len * λ2))
                 x_extend = zeros(voice_len_extend)
                 cyclic_extend!(x_extend, x)
+                # obs! length(x_extended) >= voice_len
                 
                 ζ = Int64(round(noise_len / λ))
                 partition = zeros(Int64, Int64(λ1)+1)
@@ -339,41 +341,6 @@ function mix(specification::String)
                 WAV.wavwrite(u, pathout, Fs=fs)
                 label[pathout] = [(r, r+voice_len-1)]
             end
-
-
-
-            # if mr[1] <= η <= mr[2]
-            #     rd = rand(1:q-p)
-            #     u[rd:rd+p-1] += x
-            #     # clipping sample if over-range?
-            #     path = joinpath(s["mix_root"],"wav","$(fcount)+$(nid)+$(sid)+1+1+$(sp)+$(sn).wav")
-            #     WAV.wavwrite(u, path, Fs=fs)
-            #     label[path] = [(rd, rd+p-1)]
-            #     gain[path] = gvec
-            # # η > mr[2] or η < mr[1]    
-            # else 
-            #     np = 1
-            #     nq = 1
-            #     while !(mr[1] <= η <= mr[2])
-            #         η > mr[2] && (nq += 1)
-            #         η < mr[1] && (np += 1)
-            #         η = (np*p)/(nq*q)                    
-            #     end
-            #     path = joinpath(s["mix_root"],"wav","$(fcount)+$(nid)+$(sid)+$(np)+$(nq)+$(sp)+$(sn).wav")
-            #     stamp = Array{Tuple{Int64, Int64},1}()
-
-            #     u = repeat(u, outer=nq)
-            #     pp = Int64(floor((nq*q)/np)) 
-            #     for k = 0:np-1
-            #         rd = k*pp+rand(1:pp-p)
-            #         u[rd:rd+p-1] += x
-            #         push!(stamp,(rd, rd+p-1))
-            #     end
-            #     WAV.wavwrite(u, path, Fs=fs)
-            #     label[path] = stamp
-            #     gain[path] = gvec
-            # end
-
             mixcount += 1
         end
         info("[+ $(dn["name"]) processed +]")
@@ -396,73 +363,82 @@ end
 
 
 # remove old feature.h5 and make new
-function feature(specification::String, label::String, gain::String)
+function feature(specification_json::String, label_json::String, gain_json::String)
 
     # mixed file and label info
-    a = JSON.parsefile(label)
-    g = JSON.parsefile(gain)
-    s = JSON.parsefile(specification)
-    assert(s["sample_space"] == length(a))
+    label = JSON.parsefile(label_json)
+    gain = JSON.parsefile(gain_json)
+    sptn= JSON.parsefile(specification_json)
+
+    sr = sptn["sample_rate"]
+    n = sptn["sample_space"]
+    m = sptn["feature"]["frame_length"]
+    hp = sptn["feature"]["hop_length"]
+
+    mixroot = sptn["mix_root"]
+    voiceroot = sptn["voice_root"]
+    noiseroot = sptn["noise_root"]
+    spectrum = sptn["spectrum"]
+
+    assert(n == length(label))
+    assert(n == length(gain))
     
     # remove existing .h5 training/valid/test data
-    output = joinpath(s["mix_root"],s["psd"])
+    output = joinpath(mixroot, spectrum)
     rm(output, force=true)
-
-
-    # feature specification
-    m = s["feature"]["frame_length"]
-    d = s["feature"]["hop_length"]
-    param = FEATURE.Frame1D{Int64}(s["sample_rate"], m, d, 0)
-
-    # process each mixed to spectral domain
-    srand(s["seed"])
     progress = UI.Progress(10)
 
-    for (i,j) in enumerate(keys(a))
-        
-        p = split(j[1:end-length(".wav")],"+")
-        #[1]"D:\\mix-utility\\mixed\\1"
-        #[2]"impulsive"
-        #[3]"n48"
-        #[4]"dr1"      
-        #[5]"mklw0"    
-        #[6]"sa1"
-        #[7]"2"
-        #[8]"3"      
-        #[9]"-22.0"    
-        #[10]"20.0" 
-        noise_dup = parse(Int64,p[7])
-        speech_dup = parse(Int64,p[8])
+    for (i,v) in enumerate(keys(label))
 
-        x_mix = WAV.wavread(j)[1][:,1]
-        x_noise = WAV.wavread(joinpath(s["noise_root"],p[2],p[3]) * ".wav")[1][:,1]
-        x_speech = WAV.wavread(joinpath(s["speech_root"],p[4],p[5],p[6]) * ".wav")[1][:,1]
+        p = split(v[1:end-length(".wav")],"+")
+        # [1]"D:\\mix-utility\\mixed\\1"
+        # [2]"impulsive"
+        # [3]"n48"
+        # [4]"dr1"      
+        # [5]"mklw0"    
+        # [6]"sa1"
+        # [7]"-22.0"    
+        # [8]"20.0"
 
-        x_speech = g[j][1] .* repeat(x_speech, outer=speech_dup)
-        x_noise .*= g[j][2]
-        x_noise_ = 1e-7*randn(size(x_speech))
+        x_mix, fs = WAV.wavread(v)
+        assert(typeof(sr)(fs) == sr)
+        x_mix = view(x_mix,:,1)
 
-        assert(length(a[j]) == noise_dup)
-        for k in a[j]
-            x_noise_[k[1]:k[2]] = x_noise
+        x_voice,fs = WAV.wavread(joinpath(voiceroot,p[4],p[5],p[6]) * ".wav")
+        assert(typeof(sr)(fs) == sr)
+        x_voice = view(x_voice,:,1)
+        x_voice .*= gain[v][1]
+
+        # x_noise = WAV.wavread(joinpath(noiseroot,p[2],p[3]) * ".wav")[1][:,1]
+        # x_noise .*= gain[v][2]
+
+        # retrive pure voice
+        x_purevoice= zeros(size(x_mix))
+        for k in label[v]
+            if k[2]-k[1]+1 == length(x_voice)
+                x_purevoice[k[1]:k[2]] = x_voice
+            else
+                cyclic_extend!(view(x_purevoice,k[1]:k[2]), x_voice)
+            end
         end
         
-        # for verification purpose
-        # h5write(output, "$j/speech", x_speech)
-        # h5write(output, "$j/noise", x_noise_)
-        # h5write(output, "$j/mix", x_mix)
-        # wavwrite([x r], i*"label",Fs=s["sample_rate"])
-        f = FEATURE.hamming
-        pxx_speech, lu = FEATURE.power_spectrum(x_speech, param, m, window=f)
-        pxx_noise, lu = FEATURE.power_spectrum(x_noise_, param, m, window=f)
-        pxx_mix, lu = FEATURE.power_spectrum(x_mix, param, m, window=f)
-        
-        HDF5.h5write(output, "$j/speech", log.(pxx_speech.+eps()))
-        HDF5.h5write(output, "$j/noise", log.(pxx_noise.+eps()))
-        HDF5.h5write(output, "$j/mix", log.(pxx_mix.+eps()))
+        # retrieve pure noise
+        x_purenoise = x_mix - x_purevoice
 
-        # "frame_size"/2+1 by N matrix
-        UI.update(progress, i, length(a))
+        # for verification purpose        
+        # v_ = v[1:end-length(".wav")]
+        # WAV.wavwrite(hcat(x_mix, x_purevoice, x_purenoise), v_*"-decomp.wav",Fs=sr)
+
+        𝕏m, h = STFT2.stft2(x_mix, m, hp, STFT2.sqrthann)
+        𝕏v, h = STFT2.stft2(x_purevoice, m, hp, STFT2.sqrthann)
+        𝕏n, h = STFT2.stft2(x_purenoise, m, hp, STFT2.sqrthann)
+    
+        bm = abs.(𝕏v) ./ (abs.(𝕏v) + abs.(𝕏n))
+        
+        HDF5.h5write(output, "$v/bm", bm)
+        HDF5.h5write(output, "$v/mix", log.(abs.(𝕏m).+eps()))
+
+        UI.update(progress, i, n)
     end
     info("feature written to $(output)")
 end
@@ -479,11 +455,13 @@ function statistics(specification)
 
     # read the specification for feature extraction
     s = JSON.parsefile(specification)
-    pathstat = joinpath(s["mix_root"],"global.h5")
-    rm(pathstat, force=true)
-    m = div(s["feature"]["frame_size"], 2) + 1
+    mixroot = s["mix_root"]
+    m = div(s["feature"]["frame_length"], 2) + 1
 
-    fid = HDF5.h5open(joinpath(s["mix_root"],s["hdf5"]),"r")
+    pathstat = joinpath(mixroot,"global.h5")
+    rm(pathstat, force=true)
+    
+    fid = HDF5.h5open(joinpath(mixroot,s["spectrum"]),"r")
     l = length(names(fid))
 
     # get global frame count
@@ -546,22 +524,27 @@ end
 function tensor(specification, partitions::Int64, specification_train)
 
     # read the specification for feature extraction
-    s = JSON.parsefile(specification) 
-    m = div(s["feature"]["frame_size"], 2) + 1
-    radius = s["feature"]["frame_neighbour"]
-    nat = s["feature"]["nat_size"]
-    periph = (2radius+2) * m
+    s = JSON.parsefile(specification)
+    
+    mixroot = s["mix_root"]
+    nfft = s["feature"]["frame_length"]
+    nat = s["feature"]["nat_frames"]
+    ntxt = s["feature"]["frame_context"]
+    assert(isodd(ntxt))
+
+    m = div(nfft, 2) + 1
+    r = div(ntxt-1, 2)
+    ph = (ntxt+1) * m
 
     # extract global stat info
     # note that the global stat must be of training
-    s_train = JSON.parsefile(specification_train)
-    stat = joinpath(s_train["mix_root"],"global.h5")
-    #n = h5read(stat,"frames")
+    stat = joinpath(JSON.parsefile(specification_train)["mix_root"], "global.h5")
+    # n = h5read(stat,"frames")
     μ = HDF5.h5read(stat,"mu")
     σ = HDF5.h5read(stat,"std")
 
     # context processing
-    fid = HDF5.h5open(joinpath(s["mix_root"],s["hdf5"]),"r")
+    fid = HDF5.h5open(joinpath(mixroot, s["spectrum"]),"r")
     groups = names(fid)
     np = div(length(groups), partitions)  # groups per partitions
 
@@ -573,24 +556,23 @@ function tensor(specification, partitions::Int64, specification_train)
         for j = 1:np
             nf[j] = size(read(fid[groups[i*np+j]]["mix"]), 2)
         end  
-        data = zeros(periph, sum(nf))
+        data = zeros(ph, sum(nf))
         label = zeros(m, sum(nf))
 
         # fill in each partition with context data and nat data
-        fin = cumsum(nf)
-        start = vcat(1, 1+fin[1:end-1])
+        (start, fin) = borders(nf)
         progress = UI.Progress(10)
-
         for j = 1:np
+
             tmp = read(fid[groups[i*np+j]]["mix"])
             tmp = (tmp.-μ)./σ
-            data[:, start[j]:fin[j]] = FEATURE.sliding(tmp, radius, nat)
+            data[:, start[j]:fin[j]] = FEATURE.sliding(tmp, r, nat)
+            label[:, start[j]:fin[j]] = read(fid[groups[i*np+j]]["bm"])
 
-            tmp = read(fid[groups[i*np+j]]["speech"])
-            label[:, start[j]:fin[j]] = (tmp.-μ)./σ
             UI.update(progress, j, np)
         end
-        pathout = joinpath(s["mix_root"], "tensor-$i.h5")
+
+        pathout = joinpath(mixroot, "tensor-$i.h5")
         HDF5.h5write(pathout, "data", Float32.(data))
         HDF5.h5write(pathout, "label", Float32.(label))
         info("partition $i ok")
@@ -608,11 +590,11 @@ end
 
 function mixup()
 
-    valid_spec = "D:\\4-Workspace\\mix\\valid\\specification-2017-11-13T16-50-41-801.json"
+    valid_spec = "D:\\4-Workspace\\mix\\valid\\specification-2017-11-22T21-30-28-642-1.json"
     valid_lab = "D:\\4-Workspace\\mix\\valid\\label.json"
     valid_gain = "D:\\4-Workspace\\mix\\valid\\gain.json"
 
-    train_spec = "D:\\4-Workspace\\mix\\train\\specification-2017-11-13T16-50-41-801.json"
+    train_spec = "D:\\4-Workspace\\mix\\train\\specification-2017-11-22T21-30-28-642-1.json"
     train_lab = "D:\\4-Workspace\\mix\\train\\label.json"
     train_gain = "D:\\4-Workspace\\mix\\train\\gain.json"
 
@@ -642,3 +624,40 @@ end
 
 # module
 end
+
+
+
+
+
+
+            # if mr[1] <= η <= mr[2]
+            #     rd = rand(1:q-p)
+            #     u[rd:rd+p-1] += x
+            #     # clipping sample if over-range?
+            #     path = joinpath(s["mix_root"],"wav","$(fcount)+$(nid)+$(sid)+1+1+$(sp)+$(sn).wav")
+            #     WAV.wavwrite(u, path, Fs=fs)
+            #     label[path] = [(rd, rd+p-1)]
+            #     gain[path] = gvec
+            # # η > mr[2] or η < mr[1]    
+            # else 
+            #     np = 1
+            #     nq = 1
+            #     while !(mr[1] <= η <= mr[2])
+            #         η > mr[2] && (nq += 1)
+            #         η < mr[1] && (np += 1)
+            #         η = (np*p)/(nq*q)                    
+            #     end
+            #     path = joinpath(s["mix_root"],"wav","$(fcount)+$(nid)+$(sid)+$(np)+$(nq)+$(sp)+$(sn).wav")
+            #     stamp = Array{Tuple{Int64, Int64},1}()
+
+            #     u = repeat(u, outer=nq)
+            #     pp = Int64(floor((nq*q)/np)) 
+            #     for k = 0:np-1
+            #         rd = k*pp+rand(1:pp-p)
+            #         u[rd:rd+p-1] += x
+            #         push!(stamp,(rd, rd+p-1))
+            #     end
+            #     WAV.wavwrite(u, path, Fs=fs)
+            #     label[path] = stamp
+            #     gain[path] = gvec
+            # end
