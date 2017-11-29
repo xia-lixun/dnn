@@ -422,8 +422,12 @@ function feature(specification_json::String, label_json::String, gain_json::Stri
             end
         end
         
-        # retrieve pure noise
+        # retrieve pure noise and add dithering
         x_purenoise = x_mix - x_purevoice
+        srand(sptn["seed"])
+        dither = randn(size(x_purenoise)) * (10^(-120/20))
+        x_purenoise .+= dither
+
 
         # for verification purpose        
         # v_ = v[1:end-length(".wav")]
@@ -590,33 +594,36 @@ end
 
 function mixup()
 
-    valid_spec = "D:\\4-Workspace\\mix\\valid\\specification-2017-11-22T21-30-28-642-1.json"
+    valid_spec = "D:\\4-Workspace\\mix\\valid\\specification-2017-11-22T21-30-28-642.json"
     valid_lab = "D:\\4-Workspace\\mix\\valid\\label.json"
     valid_gain = "D:\\4-Workspace\\mix\\valid\\gain.json"
 
-    train_spec = "D:\\4-Workspace\\mix\\train\\specification-2017-11-22T21-30-28-642-1.json"
+    train_spec = "D:\\4-Workspace\\mix\\train\\specification-2017-11-22T21-30-28-642.json"
     train_lab = "D:\\4-Workspace\\mix\\train\\label.json"
     train_gain = "D:\\4-Workspace\\mix\\train\\gain.json"
 
     # mix(train_spec)                                  # generate mixed wav with labelings and gains
     # feature(train_spec, train_lab, train_gain)       # extract plain features, to valid.h5/train.h5
     # statistics(train_spec)                                # find out the global stats: mean/std/total frames
-    # tensor(train_spec, 10, train_spec)                           # convert plain features to tensor input    
+    # tensor(train_spec, 50, train_spec)                           # convert plain features to tensor input    
 
     mix(valid_spec)                                  # generate mixed wav with labelings and gains
     feature(valid_spec, valid_lab, valid_gain)       # extract plain features, to valid.h5/train.h5
     statistics(valid_spec)                                # find out the global stats: mean/std/total frames
-    tensor(valid_spec, 10, train_spec)                           # convert plain features to tensor input
+    tensor(valid_spec, 25, train_spec)                           # convert plain features to tensor input
 end
 
 
 
 
-function cola_process_dataset(specification::String, dataset::String; model::String = "")
+function process_dataset(specification::String, dataset::String; model::String = "")
 
     dset = DATA.list(dataset, t=".wav")
+    pr = UI.Progress(10)
+    n = length(dset)
     for (i,j) in enumerate(dset)
-        FORWARD.cola_processing(specification, j, model=model)
+        FORWARD.vola_processing(specification, j, model=model)
+        UI.update(pr, i, n)
     end
 end
 
@@ -624,6 +631,13 @@ end
 
 # module
 end
+
+
+
+
+
+
+
 
 
 

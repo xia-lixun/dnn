@@ -11,6 +11,7 @@ import WAV
 
 include("ui.jl")
 include("feature.jl")
+include("stft2.jl")
 
 
 
@@ -24,14 +25,14 @@ struct TF{T <: AbstractFloat}
     width_o::Int64
 
     function TF{T}(model::String) where T <: AbstractFloat
-        nn = MAT.matread(model)
+        net = MAT.matread(model)
         w = Array{Array{T,2},1}()
         b = Array{Array{T,1},1}()
 
         L = 4
         for i = 1:L
-            push!(w, transpose(nn["W$i"]))
-            push!(b, vec(nn["b$i"]))
+            push!(w, transpose(net["W$i"]))
+            push!(b, vec(net["b$i"]))
         end
 
         wdi = size(w[1], 2)
@@ -48,22 +49,84 @@ end
 # 1. x is column major, i.e. each column is an input vector to the net 
 function feedforward(model, x::AbstractArray{T,2}) where T <: AbstractFloat
     
-    nn = TF{Float32}(model)
+    net = TF{Float32}(model)
     n = size(x,2)
-    y = zeros(T, nn.width_o, n)
+    y = zeros(T, net.width_o, n)
 
     p = UI.Progress(10)
     for i = 1:n
-        a = FEATURE.sigmoid.(nn.w[1] * view(x,:,i) .+ nn.b[1])
-        for j = 2 : nn.L-1
-            a .= FEATURE.sigmoid.(nn.w[j] * a .+ nn.b[j])
+        a = FEATURE.sigmoid.(net.w[1] * view(x,:,i) .+ net.b[1])
+        for j = 2 : net.L-1
+            a .= FEATURE.sigmoid.(net.w[j] * a .+ net.b[j])
         end
-        y[:,i] .= nn.w[nn.L] * a .+ nn.b[nn.L]
+        y[:,i] .= net.w[net.L] * a .+ net.b[net.L]
         UI.update(p, i, n)
     end
     info("nn feed forward done.")
     y
 end
+
+
+
+
+
+# stft2() -> bm_processing() -> bm
+function bm_processing(model::String, 
+                       𝕏::AbstractArray{Complex{T},2}, 
+                       r::Int64, 
+                       t::Int64,
+                       μ::AbstractArray{T,1}, σ::AbstractArray{T,1}) where T <: AbstractFloat
+    x = log.(abs.(𝕏).+eps())
+    x .= (x .- μ) ./ σ
+    y = FEATURE.sliding(x, r, t)
+    net = TF{Float32}(model)
+    bm = feedforward(net, y)
+    bm
+end
+
+# do VOLA processing of a wav file
+function vola_processing(specification::String, wav::String; model::String = "")
+    
+        s = JSON.parsefile(specification)
+
+        mixroot = s["mix_root"]
+        sr = s["sample_rate"]
+        nfft = s["feature"]["frame_length"]
+        nhp = s["feature"]["hop_length"]
+        nat = s["feature"]["nat_frames"]
+        ntxt = s["feature"]["frame_context"]
+        assert(isodd(ntxt))
+        r = div(ntxt-1,2)
+        
+        # get global mu and std
+        stat = joinpath(mixroot, "global.h5")
+        μ = Float32.(HDF5.h5read(stat, "mu"))
+        σ = Float32.(HDF5.h5read(stat, "std"))
+    
+        # get input data
+        x, fs = WAV.wavread(wav)
+        assert(typeof(sr)(fs) == sr)
+        x = Float32.(x)        
+        𝕏, h = STFT2.stft2(view(x,:,1), nfft, nhp, STFT2.sqrthann)
+    
+        # reconstruct
+        if isempty(model)
+            y = STFT2.stft2(𝕏, h, nfft, nhp, STFT2.sqrthann)*2
+        else
+            𝕏 .*= bm_processing(model, 𝕏, r, nat, μ, σ)
+            y = STFT2.stft2(𝕏, h, nfft, nhp, STFT2.sqrthann)*2
+        end
+        WAV.wavwrite(y, wav[1:end-4]*"-processed.wav", Fs=sr)
+        nothing
+    end
+
+
+
+
+
+
+
+
 
 
 # do magnitude processing through the net
