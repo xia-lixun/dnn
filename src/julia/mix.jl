@@ -648,14 +648,11 @@ end
 function build(spec)
 
     mix(spec)
-    
     feature(spec)
     feature(spec, flag="test")
-    
     statistics(spec)
-
-    tensor(spec, 2)
-    tensor(spec, 2, flag="test")
+    tensor(spec, 20)
+    tensor(spec, 10, flag="test")
 end
 
 

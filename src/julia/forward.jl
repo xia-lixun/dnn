@@ -76,7 +76,7 @@ function bm_processing(model::String,
                        r::Int64, 
                        t::Int64,
                        μ::AbstractArray{T,1}, σ::AbstractArray{T,1}) where T <: AbstractFloat
-    x = log.(abs.(𝕏).+eps())
+    x = abs.(𝕏)
     x .= (x .- μ) ./ σ
     y = FEATURE.sliding(x, r, t)
     net = TF{Float32}(model)
@@ -89,8 +89,8 @@ function vola_processing(specification::String, wav::String; model::String = "")
     
         s = JSON.parsefile(specification)
 
-        mixroot = s["mix_root"]
-        sr = s["sample_rate"]
+        root = s["root"]
+        fs = s["sample_rate"]
         nfft = s["feature"]["frame_length"]
         nhp = s["feature"]["hop_length"]
         nat = s["feature"]["nat_frames"]
@@ -99,13 +99,13 @@ function vola_processing(specification::String, wav::String; model::String = "")
         r = div(ntxt-1,2)
         
         # get global mu and std
-        stat = joinpath(mixroot, "global.h5")
+        stat = joinpath(root, "training", "stat.h5")
         μ = Float32.(HDF5.h5read(stat, "mu"))
         σ = Float32.(HDF5.h5read(stat, "std"))
     
         # get input data
-        x, fs = WAV.wavread(wav)
-        assert(typeof(sr)(fs) == sr)
+        x, fs1 = WAV.wavread(wav)
+        assert(typeof(fs)(fs1) == fs)
         x = Float32.(x)        
         𝕏, h = STFT2.stft2(view(x,:,1), nfft, nhp, STFT2.sqrthann)
     
@@ -116,7 +116,7 @@ function vola_processing(specification::String, wav::String; model::String = "")
             𝕏 .*= bm_processing(model, 𝕏, r, nat, μ, σ)
             y = STFT2.stft2(𝕏, h, nfft, nhp, STFT2.sqrthann)*2
         end
-        WAV.wavwrite(y, wav[1:end-4]*"-processed.wav", Fs=sr)
+        WAV.wavwrite(y, wav[1:end-4]*"-processed.wav", Fs=fs)
         nothing
     end
 
