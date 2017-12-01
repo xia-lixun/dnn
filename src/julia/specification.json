@@ -1,0 +1,48 @@
+{
+    "root": "D:\\5-Workspace\\Mix\\",
+    "voice_depot": "D:\\5-Workspace\\Voice",
+    "noise_depot": "D:\\5-Workspace\\GoogleAudioSet",
+    
+    "voice_level": [
+        -22.0,
+        -32.0,
+        -42.0
+    ],
+
+    "snr": [
+        20.0,
+        15.0,
+        10.0,
+        5.0,
+        0.0,
+        -5.0
+    ],
+
+    "sample_rate": 16000,
+    "split_ratio_for_training": 0.7,
+    "voice_noise_time_ratio": 0.6,
+    "training_samples": 1000,
+    "test_samples": 500,
+    "seed": 1234,
+
+    "feature": {
+        "frame_context": 11,
+        "frame_length": 512,
+        "hop_length": 128,
+        "nat_frames": 7
+    },
+
+
+    "noise_categories": [
+        {
+            "name": "Air conditioning",
+            "percent": 40.0,
+            "type": "stationary"
+        },
+        {
+            "name": "Aircraft",
+            "percent": 60.0,
+            "type": "stationary"
+        }
+    ]
+}
