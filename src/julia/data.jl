@@ -27,7 +27,8 @@ function list(path::String; t = "")
     x
 end
     
-    
+
+# checksum of file list
 function checksum(list::Array{String,1})
     
     d = zeros(UInt8, 32)
@@ -43,7 +44,14 @@ function checksum(list::Array{String,1})
     d
 end
     
-    
+
+function touch_checksum(path::String)
+    d = zeros(UInt8, 32)
+    d += SHA.sha256("randomly set the checksum of path")
+    p = joinpath(path, "index.sha256")
+    writedlm(p, d)
+    nothing
+end
     
     
 function update_checksum(path::String)
@@ -51,6 +59,7 @@ function update_checksum(path::String)
     p = joinpath(path, "index.sha256")
     writedlm(p, checksum(list(path, t = ".wav")))
     info("checksum updated in $p")
+    nothing
 end
 
 function verify_checksum(path::String)
@@ -90,6 +99,7 @@ function resample(path_i::String, path_o::String, target_fs)
     info("max: $(maximum(u) / target_fs) seconds")
     info("min: $(minimum(u) / target_fs) seconds")
     rm(tm, force = true)
+    nothing
 end
 
 

@@ -15,7 +15,7 @@ include("stft2.jl")
 
 
 
-# tensorflow nn parameters
+# tensorflow nn parameters initialized from the mat file generated
 struct TF{T <: AbstractFloat}
 
     w::Array{Array{T,2},1}  # weights, w[1] is not used
@@ -42,24 +42,21 @@ struct TF{T <: AbstractFloat}
     end 
 end
 
-
-
-
 # Propagate the input data matrix through neural net
 # 1. x is column major, i.e. each column is an input vector to the net 
 function feedforward(model, x::AbstractArray{T,2}) where T <: AbstractFloat
     
-    net = TF{Float32}(model)
+    nn = TF{Float32}(model)
     n = size(x,2)
-    y = zeros(T, net.width_o, n)
+    y = zeros(T, nn.width_o, n)
 
     p = UI.Progress(10)
     for i = 1:n
-        a = FEATURE.sigmoid.(net.w[1] * view(x,:,i) .+ net.b[1])
-        for j = 2 : net.L-1
-            a .= FEATURE.sigmoid.(net.w[j] * a .+ net.b[j])
+        a = FEATURE.sigmoid.(nn.w[1] * view(x,:,i) .+ nn.b[1])
+        for j = 2 : nn.L-1
+            a .= FEATURE.sigmoid.(nn.w[j] * a .+ nn.b[j])
         end
-        y[:,i] .= net.w[net.L] * a .+ net.b[net.L]
+        y[:,i] .= nn.w[nn.L] * a .+ nn.b[nn.L]
         UI.update(p, i, n)
     end
     info("nn feed forward done.")
@@ -70,8 +67,8 @@ end
 
 
 
-# stft2() -> bm_processing() -> bm
-function bm_processing(model::String, 
+# stft2() -> bm_inference() -> bm
+function bm_inference(model::String, 
                        𝕏::AbstractArray{Complex{T},2}, 
                        r::Int64, 
                        t::Int64,
@@ -79,22 +76,27 @@ function bm_processing(model::String,
     x = abs.(𝕏)
     x .= (x .- μ) ./ σ
     y = FEATURE.sliding(x, r, t)
-    net = TF{Float32}(model)
-    bm = feedforward(net, y)
+    nn = TF{Float32}(model)
+    bm = feedforward(nn, y)
     bm
 end
 
 # do VOLA processing of a wav file
+# if nn model is provided, bm_inference() will be used for bm estimate
+# if no nn model is provided, it searches the training and test spectrum.h5 to see if wav
+# is located in: yes -> reference bm is used for voice reconstruction;
+#                no  -> reconstruct the mix back so a passing-through is achieved.
 function vola_processing(specification::String, wav::String; model::String = "")
     
         s = JSON.parsefile(specification)
 
-        root = s["root"]
         fs = s["sample_rate"]
+        root = s["root"]
         nfft = s["feature"]["frame_length"]
         nhp = s["feature"]["hop_length"]
         nat = s["feature"]["nat_frames"]
         ntxt = s["feature"]["frame_context"]
+
         assert(isodd(ntxt))
         r = div(ntxt-1,2)
         
@@ -111,14 +113,42 @@ function vola_processing(specification::String, wav::String; model::String = "")
     
         # reconstruct
         if isempty(model)
-            y = STFT2.stft2(𝕏, h, nfft, nhp, STFT2.sqrthann)*2
+            # load the train/test spectrum+bm dataset
+            tid = HDF5.h5open(joinpath(s["root"],"training","spectrum.h5"),"r")
+            vid = HDF5.h5open(joinpath(s["root"],"test","spectrum.h5"),"r")
+
+            tbi = contains.(names(tid),basename(wav))
+            vbi = contains.(names(vid),basename(wav))
+            sumt = sum(tbi)
+            sumv = sum(vbi)
+            if sumt + sumv == 1
+                info("found in training/test wav files, use optimal bm")
+                hit = sumt > sumv ? names(tid)[tbi][1] : names(vid)[vbi][1]
+                bm = sumt > sumv ?  read(tid[hit]["bm"]) : read(vid[hit]["bm"])
+                𝕏 .*= Float32.(bm)
+                y = STFT2.stft2(𝕏, h, nfft, nhp, STFT2.sqrthann)*2
+            elseif sumt + sumv == 0
+                info("not found in training/test wav files...passing through")
+                y = STFT2.stft2(𝕏, h, nfft, nhp, STFT2.sqrthann)*2
+            else
+                error("multiple maps of training/test wav files")
+            end
+
+            close(vid)
+            close(tid)
         else
-            𝕏 .*= bm_processing(model, 𝕏, r, nat, μ, σ)
+            𝕏 .*= bm_inference(model, 𝕏, r, nat, μ, σ)
             y = STFT2.stft2(𝕏, h, nfft, nhp, STFT2.sqrthann)*2
         end
+        
         WAV.wavwrite(y, wav[1:end-4]*"-processed.wav", Fs=fs)
         nothing
-    end
+end
+
+
+
+
+
 
 
 
