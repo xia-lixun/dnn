@@ -37,7 +37,7 @@ function generate_specification()
         "test_samples" => 10,
         "seed" => 42,
         "feature" => Dict("frame_length"=>512, "hop_length"=>128, "frame_context"=>11, "nat_frames"=>7),
-        "tensor_partition_size(MB)" => 2048,
+        "tensor_partition_size(MB)" => 1024,
         "noise_categories" => x
         )
     for i in DATA.list(a["noise_depot"])
@@ -737,10 +737,12 @@ function process_dataset(specification::String, dataset::String; model::String =
     dset = DATA.list(dataset, t=".wav")
     pr = UI.Progress(10)
     n = length(dset)
+    bm = Dict{String, Array{Float32,2}}()
     for (i,j) in enumerate(dset)
-        FORWARD.vola_processing(specification, j, model=model)
+        bm[j] = FORWARD.vola_processing(specification, j, model=model)
         UI.update(pr, i, n)
     end
+    bm
 end
 
 

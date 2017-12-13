@@ -89,7 +89,6 @@ end
 function vola_processing(specification::String, wav::String; model::String = "")
     
         s = JSON.parsefile(specification)
-
         fs = s["sample_rate"]
         root = s["root"]
         nfft = s["feature"]["frame_length"]
@@ -110,13 +109,13 @@ function vola_processing(specification::String, wav::String; model::String = "")
         assert(typeof(fs)(fs1) == fs)
         x = Float32.(x)        
         𝕏, h = STFT2.stft2(view(x,:,1), nfft, nhp, STFT2.sqrthann)
-    
-        # reconstruct
-        if isempty(model)
+
+        
+        function bm_reference()
             # load the train/test spectrum+bm dataset
             tid = HDF5.h5open(joinpath(s["root"],"training","spectrum.h5"),"r")
             vid = HDF5.h5open(joinpath(s["root"],"test","spectrum.h5"),"r")
-
+            
             tbi = contains.(names(tid),basename(wav))
             vbi = contains.(names(vid),basename(wav))
             sumt = sum(tbi)
@@ -125,24 +124,34 @@ function vola_processing(specification::String, wav::String; model::String = "")
                 info("found in training/test wav files, use optimal bm")
                 hit = sumt > sumv ? names(tid)[tbi][1] : names(vid)[vbi][1]
                 bm = sumt > sumv ?  read(tid[hit]["bm"]) : read(vid[hit]["bm"])
-                𝕏 .*= Float32.(bm)
-                y = STFT2.stft2(𝕏, h, nfft, nhp, STFT2.sqrthann)*2
+                close(vid)
+                close(tid)
+                return Float32.(bm)
+                            
             elseif sumt + sumv == 0
                 info("not found in training/test wav files...passing through")
-                y = STFT2.stft2(𝕏, h, nfft, nhp, STFT2.sqrthann)*2
+                return ones(Float32,size(𝕏))
             else
                 error("multiple maps of training/test wav files")
             end
-
-            close(vid)
-            close(tid)
-        else
-            𝕏 .*= bm_inference(model, 𝕏, r, nat, μ, σ)
-            y = STFT2.stft2(𝕏, h, nfft, nhp, STFT2.sqrthann)*2
         end
         
+        
+        # reconstruct
+        if isempty(model)
+            bmr = bm_reference()
+            𝕏 .*= bmr
+        else
+            bmi = bm_inference(model, 𝕏, r, nat, μ, σ)
+            bmr = bm_reference()
+            𝕏 .*= bmi
+            bmr .= abs.(bmi.-bmr)./bmr
+        end
+        
+        y = STFT2.stft2(𝕏, h, nfft, nhp, STFT2.sqrthann)*2
         WAV.wavwrite(y, wav[1:end-4]*"-processed.wav", Fs=fs)
-        nothing
+        
+        return bmr
 end
 
 
