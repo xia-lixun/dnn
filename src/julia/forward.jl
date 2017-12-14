@@ -56,7 +56,7 @@ function feedforward(model, x::AbstractArray{T,2}) where T <: AbstractFloat
         for j = 2 : nn.L-1
             a .= FEATURE.sigmoid.(nn.w[j] * a .+ nn.b[j])
         end
-        y[:,i] .= nn.w[nn.L] * a .+ nn.b[nn.L]
+        y[:,i] .= FEATURE.sigmoid.(nn.w[nn.L] * a .+ nn.b[nn.L])
         UI.update(p, i, n)
     end
     info("nn feed forward done.")
@@ -145,7 +145,7 @@ function vola_processing(specification::String, wav::String; model::String = "")
             bmi = bm_inference(model, 𝕏, r, nat, μ, σ)
             bmr = bm_reference()
             𝕏 .*= bmi
-            bmr .= abs.(bmi.-bmr)./bmr
+            bmr .= abs.(bmi.-bmr)
         end
         
         y = STFT2.stft2(𝕏, h, nfft, nhp, STFT2.sqrthann)*2

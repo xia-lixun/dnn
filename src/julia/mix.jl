@@ -742,7 +742,34 @@ function process_dataset(specification::String, dataset::String; model::String =
         bm[j] = FORWARD.vola_processing(specification, j, model=model)
         UI.update(pr, i, n)
     end
-    bm
+    
+    # log bm error to dataset/../bmerr.h5 
+    s = JSON.parsefile(specification)   
+    m = div(s["feature"]["frame_length"],2)+1
+    bma = zeros(Float32, m)
+    path5 = joinpath(realpath(joinpath(dataset, "..")), "bmerr.h5")
+    for i in keys(bm)
+        bma .+= vec(mean(bm[i],2))
+        HDF5.h5write(path5, i, bm[i])
+    end
+    bma .= bma ./ length(bm)
+    bma
+end
+
+
+function benchmark(specification::String, bm_error::String)
+
+    s = JSON.parsefile(specification)   
+    m = div(s["feature"]["frame_length"],2)+1
+    bma = zeros(Float32, m)
+
+    fid = HDF5.h5open(bm_error, "r")
+    for i in names(fid)
+        bma .+= vec(mean(read(fid[i]),2))
+    end
+    bma .= bma ./ length(names(fid))
+    close(fid)
+    bma
 end
 
 
