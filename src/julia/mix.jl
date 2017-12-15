@@ -732,19 +732,37 @@ end
 
 
 
-function process_dataset(specification::String, dataset::String; model::String = "")
+function process_validset(specification::String, dataset::String, model::String)
+
+    s = JSON.parsefile(specification)   
+    root = s["root"]
+    nfft = s["feature"]["frame_length"]
+    nhp = s["feature"]["hop_length"]
+    nat = s["feature"]["nat_frames"]
+    ntxt = s["feature"]["frame_context"]
+    assert(isodd(ntxt))
+
+    # get global mu and std
+    stat = joinpath(root, "training", "stat.h5")
+    μ = Float32.(HDF5.h5read(stat, "mu"))
+    σ = Float32.(HDF5.h5read(stat, "std"))
+
+    nn = FORWARD.TF{Float32}(model)
+    bm = Dict{String, Array{Float32,2}}()
+
+    # load the train/test spectrum+bm dataset
+    tid = HDF5.h5open(joinpath(root,"training","spectrum.h5"),"r")
+    vid = HDF5.h5open(joinpath(root,"test","spectrum.h5"),"r")
 
     dset = DATA.list(dataset, t=".wav")
-    pr = UI.Progress(10)
-    n = length(dset)
-    bm = Dict{String, Array{Float32,2}}()
-    for (i,j) in enumerate(dset)
-        bm[j] = FORWARD.vola_processing(specification, j, model=model)
-        UI.update(pr, i, n)
+    for i in dset
+        bm[i] = FORWARD.vola_processing(nfft, nhp, nat, ntxt, μ, σ, tid, vid, i, nn)
     end
     
+    close(vid)
+    close(tid)
+    
     # log bm error to dataset/../bmerr.h5 
-    s = JSON.parsefile(specification)   
     m = div(s["feature"]["frame_length"],2)+1
     bma = zeros(Float32, m)
     path5 = joinpath(realpath(joinpath(dataset, "..")), "bmerr.h5")
@@ -755,6 +773,7 @@ function process_dataset(specification::String, dataset::String; model::String =
     bma .= bma ./ length(bm)
     bma
 end
+
 
 
 function benchmark(specification::String, bm_error::String)

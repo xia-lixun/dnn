@@ -289,7 +289,7 @@ function sliding(x::Array{T,2}, r::Int64, t::Int64) where T <: AbstractFloat
     head = repmat(x[:,1], 1, r)
     tail = repmat(x[:,end], 1, r)
     x = hcat(head, x, tail)
-    y = zeros((2r+2)*m, n)
+    y = zeros(T, (2r+2)*m, n)
 
     for i = 1:n
         focus = view(x,:,symm(r+i,r))

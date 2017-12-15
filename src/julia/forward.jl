@@ -22,44 +22,47 @@ struct TF{T <: AbstractFloat}
     b::Array{Array{T,1},1}  # biases, b[1] is not used
     L::Int64  # layers
     width_i::Int64
+    width_h::Int64
     width_o::Int64
 
     function TF{T}(model::String) where T <: AbstractFloat
-        net = MAT.matread(model)
-        w = Array{Array{T,2},1}()
-        b = Array{Array{T,1},1}()
-
         L = 4
+        net = MAT.matread(model)
+        w = Array{Array{T,2},1}(L)
+        b = Array{Array{T,1},1}(L)
+
         for i = 1:L
-            push!(w, transpose(net["W$i"]))
-            push!(b, vec(net["b$i"]))
+            w[i] = transpose(net["W$i"])
+            b[i] = vec(net["b$i"])
         end
 
         wdi = size(w[1], 2)
+        wdh = size(w[1], 1)
         wdo = size(w[end], 1)
 
-        new(w, b, L, wdi, wdo)
+        new(w, b, L, wdi, wdh, wdo)
     end 
 end
 
+
+
 # Propagate the input data matrix through neural net
 # 1. x is column major, i.e. each column is an input vector to the net 
-function feedforward(model, x::AbstractArray{T,2}) where T <: AbstractFloat
+function feedforward(nn::TF{T}, x::AbstractArray{T,2}) where T <: AbstractFloat
     
-    nn = TF{Float32}(model)
+    # nn = TF{Float32}(model)
+    # assert(nn.width_i == size(x,1))
     n = size(x,2)
     y = zeros(T, nn.width_o, n)
+    a = zeros(T, nn.width_h)
 
-    p = UI.Progress(10)
     for i = 1:n
-        a = FEATURE.sigmoid.(nn.w[1] * view(x,:,i) .+ nn.b[1])
+        a .= FEATURE.sigmoid.(nn.w[1] * view(x,:,i) .+ nn.b[1])
         for j = 2 : nn.L-1
             a .= FEATURE.sigmoid.(nn.w[j] * a .+ nn.b[j])
         end
         y[:,i] .= FEATURE.sigmoid.(nn.w[nn.L] * a .+ nn.b[nn.L])
-        UI.update(p, i, n)
     end
-    info("nn feed forward done.")
     y
 end
 
@@ -68,15 +71,14 @@ end
 
 
 # stft2() -> bm_inference() -> bm
-function bm_inference(model::String, 
-                       𝕏::AbstractArray{Complex{T},2}, 
-                       r::Int64, 
-                       t::Int64,
-                       μ::AbstractArray{T,1}, σ::AbstractArray{T,1}) where T <: AbstractFloat
+function bm_inference(nn::TF{T}, 
+                      𝕏::AbstractArray{Complex{T},2}, 
+                      r::Int64, 
+                      t::Int64,
+                      μ::AbstractArray{T,1}, σ::AbstractArray{T,1}) where T <: AbstractFloat
     x = abs.(𝕏)
     x .= (x .- μ) ./ σ
     y = FEATURE.sliding(x, r, t)
-    nn = TF{Float32}(model)
     bm = feedforward(nn, y)
     bm
 end
@@ -142,7 +144,7 @@ function vola_processing(specification::String, wav::String; model::String = "")
             bmr = bm_reference()
             𝕏 .*= bmr
         else
-            bmi = bm_inference(model, 𝕏, r, nat, μ, σ)
+            bmi = bm_inference(TF{Float32}(model), 𝕏, r, nat, μ, σ)
             bmr = bm_reference()
             𝕏 .*= bmi
             bmr .= abs.(bmi.-bmr)
@@ -157,6 +159,44 @@ end
 
 
 
+function vola_processing(nfft, nhp, nat, ntxt, μ, σ, tid, vid, wav::String, nn::TF{Float32})
+    
+        r = div(ntxt-1,2)
+        x, sr = WAV.wavread(wav)
+        x = Float32.(x)        
+        𝕏, h = STFT2.stft2(view(x,:,1), nfft, nhp, STFT2.sqrthann)
+
+        function bm_reference()
+            
+            tbi = contains.(names(tid),basename(wav))
+            vbi = contains.(names(vid),basename(wav))
+            sumt = sum(tbi)
+            sumv = sum(vbi)
+            if sumt + sumv == 1
+                hit = sumt > sumv ? names(tid)[tbi][1] : names(vid)[vbi][1]
+                bm = sumt > sumv ?  read(tid[hit]["bm"]) : read(vid[hit]["bm"])
+                return Float32.(bm)
+                            
+            elseif sumt + sumv == 0
+                info("not found in training/test wav files...passing through")
+                return ones(Float32,size(𝕏))
+            else
+                error("multiple maps of training/test wav files")
+            end
+        end
+        
+        # guestimate the bm mask and log the error
+        bmi = bm_inference(nn, 𝕏, r, nat, μ, σ)
+        bmr = bm_reference()
+        𝕏 .*= bmi
+        bmr .= abs.(bmi.-bmr)
+
+        # reconstruct
+        y = STFT2.stft2(𝕏, h, nfft, nhp, STFT2.sqrthann)*2
+        WAV.wavwrite(y, wav[1:end-4]*"-processed.wav", Fs=sr)
+        
+        return bmr
+end
 
 
 
