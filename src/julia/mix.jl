@@ -688,16 +688,6 @@ function tensor(specifijson, ngpp; flag="training")
         nothing
     end
 
-    # gpp = div(length(groups), partitions)  # groups per partitions
-    # for i = 0:partitions-1
-    #     tensorblock(i*gpp, gpp, i)    
-    #     info("partition $i ok")
-    # end
-    # gppr = rem(length(groups), partitions)
-    # if gppr > 0
-    #     tensorblock(partitions*gpp, gppr, partitions)
-    # end
-
     t = 0
     i = 0
     while i+ngpp <= length(groups)

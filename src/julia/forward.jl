@@ -159,7 +159,7 @@ end
 
 
 
-function vola_processing(nfft, nhp, nat, ntxt, μ, σ, tid, vid, wav::String, nn::TF{Float32})
+function vola_processing(nfft::Int64, nhp::Int64, nat::Int64, ntxt::Int64, μ::Array{Float32,1}, σ::Array{Float32,1}, tid, vid, wav::String, nn::TF{Float32})
     
         r = div(ntxt-1,2)
         x, sr = WAV.wavread(wav)
