@@ -609,9 +609,13 @@ function tensorsize_estimate(specifijson)
     end
 
     pathout = joinpath(tempdir(), "tensor.h5")
-    HDF5.h5write(pathout, "data", Float32.(data))
-    HDF5.h5write(pathout, "label", Float32.(label))
-
+    # HDF5.h5write(pathout, "data", Float32.(data))
+    # HDF5.h5write(pathout, "label", Float32.(label))
+    HDF5.h5open(pathout,"w") do file
+        file["/"]["data", "shuffle", (), "deflate", 4] = Float32.(data)
+        file["/"]["label", "shuffle", (), "deflate", 4] = Float32.(label)
+    end
+        
     # estimate number of bytes per group
     bytes = div(filesize(pathout), 10)
     limit = limit * 1024 * 1024
@@ -683,8 +687,12 @@ function tensor(specifijson, ngpp; flag="training")
         end
 
         pathout = joinpath(tensordir, "tensor-$k.h5")
-        HDF5.h5write(pathout, "data", Float32.(data))
-        HDF5.h5write(pathout, "label", Float32.(label))
+        # HDF5.h5write(pathout, "data", Float32.(data))
+        # HDF5.h5write(pathout, "label", Float32.(label))
+        HDF5.h5open(pathout,"w") do file
+            file["/"]["data", "shuffle", (), "deflate", 4] = Float32.(data)
+            file["/"]["label", "shuffle", (), "deflate", 4] = Float32.(label)
+        end
         nothing
     end
 
@@ -753,32 +761,41 @@ function process_validset(specification::String, dataset::String, model::String)
     close(tid)
     
     # log bm error to dataset/../bmerr.h5 
-    m = div(s["feature"]["frame_length"],2)+1
-    bma = zeros(Float32, m)
     path5 = joinpath(realpath(joinpath(dataset, "..")), "bmerr.h5")
-    for i in keys(bm)
-        bma .+= vec(mean(bm[i],2))
-        HDF5.h5write(path5, i, bm[i])
+    HDF5.h5open(path5,"w") do file
+        for i in keys(bm)
+            # HDF5.h5write(path5, i, bm[i])
+            file["/"][i, "shuffle", (), "deflate", 4] = bm[i]
+        end
     end
-    bma .= bma ./ length(bm)
-    bma
+    nothing
 end
 
 
 
-function benchmark(specification::String, bm_error::String)
+function benchmark(specification::String, bmerr::String)
 
     s = JSON.parsefile(specification)   
     m = div(s["feature"]["frame_length"],2)+1
-    bma = zeros(Float32, m)
 
-    fid = HDF5.h5open(bm_error, "r")
-    for i in names(fid)
-        bma .+= vec(mean(read(fid[i]),2))
+    file = HDF5.h5open(bmerr, "r")
+    bm = [(i, mean(read(file[i]),1), mean(read(file[i]),2)) for i in names(file)]
+    close(file)
+
+    # bm average over the whole batch
+    function gobal_average()
+        av = zeros(Float32, m)
+        for i in bm
+            av .+= vec(i[3])
+        end
+        av .= av ./ length(bm)
     end
-    bma .= bma ./ length(names(fid))
-    close(fid)
-    bma
+
+    (gobal_average(),bm)
+
+    # sort!(bm, by=x->sum(x[3]), rev=true)                # worst case by all bins
+    # sort!(bm, by=x->sum(view(x[3],13:37,:)), rev=true)  # worst case by bin 13 to 37
+    # sort!(bm, by=x->maximum(x[2]), rev=true)            # worst case by highest dm deviation in frames
 end
 
 

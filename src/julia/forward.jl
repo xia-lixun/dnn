@@ -115,8 +115,8 @@ function vola_processing(specification::String, wav::String; model::String = "")
         
         function bm_reference()
             # load the train/test spectrum+bm dataset
-            tid = HDF5.h5open(joinpath(s["root"],"training","spectrum.h5"),"r")
-            vid = HDF5.h5open(joinpath(s["root"],"test","spectrum.h5"),"r")
+            tid = HDF5.h5open(joinpath(root,"training","spectrum.h5"),"r")
+            vid = HDF5.h5open(joinpath(root,"test","spectrum.h5"),"r")
             
             tbi = contains.(names(tid),basename(wav))
             vbi = contains.(names(vid),basename(wav))
@@ -197,6 +197,13 @@ function vola_processing(nfft::Int64, nhp::Int64, nat::Int64, ntxt::Int64, μ::A
         
         return bmr
 end
+
+
+
+
+
+
+
 
 
 
