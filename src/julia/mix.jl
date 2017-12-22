@@ -609,12 +609,12 @@ function tensorsize_estimate(specifijson)
     end
 
     pathout = joinpath(tempdir(), "tensor.h5")
-    # HDF5.h5write(pathout, "data", Float32.(data))
-    # HDF5.h5write(pathout, "label", Float32.(label))
-    HDF5.h5open(pathout,"w") do file
-        file["/"]["data", "shuffle", (), "deflate", 4] = Float32.(data)
-        file["/"]["label", "shuffle", (), "deflate", 4] = Float32.(label)
-    end
+    HDF5.h5write(pathout, "data", Float32.(data))
+    HDF5.h5write(pathout, "label", Float32.(label))
+    # HDF5.h5open(pathout,"w") do file
+    #     file["/"]["data", "shuffle", (), "deflate", 4] = Float32.(data)
+    #     file["/"]["label", "shuffle", (), "deflate", 4] = Float32.(label)
+    # end
         
     # estimate number of bytes per group
     bytes = div(filesize(pathout), 10)
@@ -687,12 +687,12 @@ function tensor(specifijson, ngpp; flag="training")
         end
 
         pathout = joinpath(tensordir, "tensor-$k.h5")
-        # HDF5.h5write(pathout, "data", Float32.(data))
-        # HDF5.h5write(pathout, "label", Float32.(label))
-        HDF5.h5open(pathout,"w") do file
-            file["/"]["data", "shuffle", (), "deflate", 4] = Float32.(data)
-            file["/"]["label", "shuffle", (), "deflate", 4] = Float32.(label)
-        end
+        HDF5.h5write(pathout, "data", Float32.(data))
+        HDF5.h5write(pathout, "label", Float32.(label))
+        # HDF5.h5open(pathout,"w") do file
+        #     file["/"]["data", "shuffle", (), "deflate", 4] = Float32.(data)
+        #     file["/"]["label", "shuffle", (), "deflate", 4] = Float32.(label)
+        # end
         nothing
     end
 
