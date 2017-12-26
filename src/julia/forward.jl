@@ -203,7 +203,23 @@ end
 
 
 
-
+function bm_inference(
+    nn::TF{Float32},
+    x::AbstractArray{Float32,1},
+    nfft::Int64, 
+    nhp::Int64,
+    ntxt::Int64, 
+    nat::Int64,
+    μ::Array{Float32,1}, 
+    σ::Array{Float32,1}
+    )
+    
+    r = div(ntxt-1,2)
+    𝕏, h = STFT2.stft2(x, nfft, nhp, STFT2.sqrthann)
+    bm = bm_inference(nn, 𝕏, r, nat, μ, σ)
+        
+    return bm
+end
 
 
 
