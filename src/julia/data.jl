@@ -103,5 +103,24 @@ function resample(path_i::String, path_o::String, target_fs)
 end
 
 
+
+
+function writebin(file::String, data::AbstractArray{T}) where T<:Number
+    open(file, "w") do f
+        for i in data
+            write(f, i)
+        end
+    end
+end
+
+
+function readbin(file::String, dtype::Type{T}) where T<:Number
+    open(file, "r") do f
+        reinterpret(dtype, read(f))
+    end
+end
+
+
+
 # module
 end
