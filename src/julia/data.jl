@@ -36,7 +36,7 @@ function checksum(list::Array{String,1})
     p = UI.Progress(10)
     
     for (i, j) in enumerate(list)
-        d += open(j) do f
+        d .+= open(j) do f
             SHA.sha256(f)
         end
         UI.update(p, i, n)
@@ -47,7 +47,7 @@ end
 
 function touch_checksum(path::String)
     d = zeros(UInt8, 32)
-    d += SHA.sha256("randomly set the checksum of path")
+    d .+= SHA.sha256("randomly set the checksum of path")
     p = joinpath(path, "index.sha256")
     writedlm(p, d)
     nothing
@@ -118,6 +118,64 @@ function readbin(file::String, dtype::Type{T}) where T<:Number
     open(file, "r") do f
         reinterpret(dtype, read(f))
     end
+end
+
+
+
+
+
+
+function deduplicate(path::String, t=".wav")
+    a = list(path, t=t)
+    redundent::Int64 = 0
+
+    function digest(x)
+        open(x,"r") do fid 
+            SHA.sha256(fid) 
+        end
+    end
+
+    # input: array of redundent files
+    # side-effect: files removed
+    #              number of files removed accumulated
+    function remove_redundency(x::Array{String})
+        len = [length(list(dirname(i), t=t)) for i in x]
+        keep = indmin(len)
+        for (i,v) in enumerate(x)
+            i != keep && rm(v, force=true)
+        end
+        redundent += (length(x)-1)
+        nothing
+    end
+
+    open(joinpath(path,"dedup.log"),"w") do f 
+        
+        info("Building checksum list...")
+        chk = [digest(i) for i in a]
+        info("Done.")
+
+        n = length(chk)
+        hit::Bool = false
+
+        for i = 1:n-1
+            hit = false
+            dup = String[]
+            for j = i+1:n
+                if chk[i]==chk[j]
+                    write(f,"$(a[j])\n")
+                    push!(dup, a[j])
+                    hit = true
+                end
+            end
+            if hit == true
+                write(f,"[+$(a[i])+]\n\n")
+                push!(dup, a[i])
+                remove_redundency(dup)
+            end
+        end
+        info("$redundent files removed")
+    end
+    nothing
 end
 
 
