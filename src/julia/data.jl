@@ -142,7 +142,7 @@ function deduplicate(path::String, t=".wav")
         len = [length(list(dirname(i), t=t)) for i in x]
         keep = indmin(len)
         for (i,v) in enumerate(x)
-            i != keep && rm(v, force=true)
+            i != keep && rm(v)
         end
         redundent += (length(x)-1)
         nothing
@@ -156,21 +156,25 @@ function deduplicate(path::String, t=".wav")
 
         n = length(chk)
         hit::Bool = false
+        cache = Set{Int64}()
 
         for i = 1:n-1
-            hit = false
-            dup = String[]
-            for j = i+1:n
-                if chk[i]==chk[j]
-                    write(f,"$(a[j])\n")
-                    push!(dup, a[j])
-                    hit = true
+            if !in(i, cache)
+                hit = false
+                dup = String[]
+                for j = i+1:n
+                    if chk[i]==chk[j]
+                        push!(cache,j)
+                        write(f,"$(a[j])\n")
+                        push!(dup, a[j])
+                        hit = true
+                    end
                 end
-            end
-            if hit == true
-                write(f,"[+$(a[i])+]\n\n")
-                push!(dup, a[i])
-                remove_redundency(dup)
+                if hit == true
+                    write(f,"[+$(a[i])+]\n\n")
+                    push!(dup, a[i])
+                    remove_redundency(dup)
+                end
             end
         end
         info("$redundent files removed")
