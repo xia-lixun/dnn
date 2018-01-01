@@ -523,14 +523,27 @@ function statistics(specifijson)
     fid = HDF5.h5open(joinpath(root,"training","spectrum.h5"),"r")
     l = length(names(fid))
 
-    # get global frame count
+    # get total frame count of training set
     n = zero(Int128)
     progress = UI.Progress(10)
     for (i,j) in enumerate(names(fid))
         n += size(read(fid[j]["mix"]), 2)
         UI.update(progress, i, l)
     end
-    info("global spectrum count: $n")
+    info("global spectrum count(training): $n")
+
+    # get total frame count of validation set
+    fidv = HDF5.h5open(joinpath(root,"test","spectrum.h5"),"r")
+    lv = length(names(fidv))
+    nv = zero(Int128)
+    UI.rewind(progress)
+    for (i,j) in enumerate(names(fidv))
+        nv += size(read(fidv[j]["mix"]), 2)
+        UI.update(progress, i, lv)
+    end
+    info("global spectrum count(validation): $nv")
+    close(fidv)
+
 
     # get global mean log power spectrum
     μ = zeros(m)
@@ -567,7 +580,8 @@ function statistics(specifijson)
 
     HDF5.h5write(pathstat, "mu", μ)
     HDF5.h5write(pathstat, "std", σ)
-    HDF5.h5write(pathstat, "frames", Int64(n))
+    HDF5.h5write(pathstat, "frames_training", Int64(n))
+    HDF5.h5write(pathstat, "frames_validation", Int64(nv))
     assert(n < typemax(Int64))
     info("global results written to $(pathstat)")
 
@@ -608,9 +622,15 @@ function tensorsize_estimate(specifijson)
         label[:, start[j]:fin[j]] = read(fid[index[j]]["bm"])    
     end
 
-    pathout = joinpath(tempdir(), "tensor.h5")
-    HDF5.h5write(pathout, "data", Float32.(data))
-    HDF5.h5write(pathout, "label", Float32.(label))
+    pathout = joinpath(tempdir(), "tensor.bin")
+    DATA.writebin(pathout, vcat(Float32.(data), Float32.(label)))
+
+    # option h5:
+    # pathout = joinpath(tempdir(), "tensor.h5")
+    # HDF5.h5write(pathout, "data", Float32.(data))
+    # HDF5.h5write(pathout, "label", Float32.(label))
+    
+    # option h5 compressed:
     # HDF5.h5open(pathout,"w") do file
     #     file["/"]["data", "shuffle", (), "deflate", 4] = Float32.(data)
     #     file["/"]["label", "shuffle", (), "deflate", 4] = Float32.(label)
@@ -686,9 +706,13 @@ function tensor(specifijson, ngpp; flag="training")
             UI.update(progress, j, np)
         end
 
-        pathout = joinpath(tensordir, "tensor-$k.h5")
-        HDF5.h5write(pathout, "data", Float32.(data))
-        HDF5.h5write(pathout, "label", Float32.(label))
+        pathout = joinpath(tensordir, "tensor_$k.bin")
+        DATA.writebin(pathout, vcat(Float32.(data), Float32.(label)))
+        
+        # pathout = joinpath(tensordir, "tensor-$k.h5")
+        # HDF5.h5write(pathout, "data", Float32.(data))
+        # HDF5.h5write(pathout, "label", Float32.(label))
+
         # HDF5.h5open(pathout,"w") do file
         #     file["/"]["data", "shuffle", (), "deflate", 4] = Float32.(data)
         #     file["/"]["label", "shuffle", (), "deflate", 4] = Float32.(label)
