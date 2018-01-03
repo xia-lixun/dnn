@@ -12,20 +12,22 @@ BM_BINS = 257
 BM_SPREAD = 24
 HIDDEN_LAYER_WIDTH = 2048
 
-N_EPOCHS = 50
-BATCH_SIZE = 5000
 
-TRAIN_ROOT = '/home/coc/5-Workspace/train/tensor_'
-TRAIN_PARTS = 38
-TEST_ROOT = '/home/coc/5-Workspace/test/tensor_'
-TEST_PARTS = 8
+TRAIN_ROOT = '/media/coc/Dataset/train/tensor_'
+TRAIN_PARTS = 4
+TEST_ROOT = '/media/coc/Dataset/test/tensor_'
+TEST_PARTS = 2
 
+N_EPOCHS = 90
+BATCH_SIZE_INIT = 100
+LEARN_RATE_INIT = 0.001
+DROPOUT_COEFF = 0.8
+L2_LOSS_COEFF = 1.0
 MOMENTUM_COEFF = 0.9
-LEARN_RATE_INIT = 0.05
-MATFILE = '/home/coc/5-Workspace/train/specification-2017-12-01.mat'
+MATFILE = '/media/coc/Dataset/model-20180103.mat'
 
-rng = np.random.RandomState(1234)
-evaluate_cost_opt = 1000000.0
+rng = np.random.RandomState(42)
+
 
 
 
@@ -139,7 +141,7 @@ layers = [
     Dense(BM_BINS*BM_SPREAD, HIDDEN_LAYER_WIDTH, tf.nn.sigmoid),
     Dense(HIDDEN_LAYER_WIDTH, HIDDEN_LAYER_WIDTH, tf.nn.sigmoid),
     Dense(HIDDEN_LAYER_WIDTH, HIDDEN_LAYER_WIDTH, tf.nn.sigmoid),
-    Dense(HIDDEN_LAYER_WIDTH, BM_BINS, tf.nn.sigmoid)
+    Dense(HIDDEN_LAYER_WIDTH, BM_BINS)
 ]
 
 keep_prob = tf.placeholder(tf.float32)
@@ -150,15 +152,16 @@ lrate_p = tf.placeholder(tf.float32)
 mt_p = tf.placeholder(tf.float32)
 
 # cost = tf.reduce_mean(tf.reduce_sum((y - t)**2, 1))
-cost_op = tf.reduce_mean(tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(labels=t, logits=y), 1))
+cost_op = (tf.reduce_mean(tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(labels=t, logits=y), 1)) + 
+          (L2_LOSS_COEFF * tf.nn.l2_loss(layers[0].W)) +
+          (L2_LOSS_COEFF * tf.nn.l2_loss(layers[1].W)) +
+          (L2_LOSS_COEFF * tf.nn.l2_loss(layers[2].W)))
 train_op = tf.train.MomentumOptimizer(learning_rate=lrate_p, momentum=mt_p).minimize(cost_op)
 
 # saver = tf.train.Saver()
 sess = tf.Session()
 sess.run(tf.global_variables_initializer())
 
-
-sess.close()
 
 
 
@@ -203,8 +206,10 @@ def evaluate_cost(data_pool, label_pool):
 
 def training():
 
+    evaluate_cost_opt = 1000000.0
     mt = MOMENTUM_COEFF
     lrate = LEARN_RATE_INIT
+    lbs = BATCH_SIZE_INIT
 
     test_datapool, test_labelpool = load_dataset_to_mem(TEST_ROOT, TEST_PARTS)
     evaluate_cost_val = evaluate_cost(test_datapool, test_labelpool)
@@ -212,19 +217,26 @@ def training():
 
     for epoch in range(N_EPOCHS):
         
-        # simulated annealing
-        if(epoch>10):
-            lrate = lrate * 0.5
-        if(epoch>20):
-            lrate = lrate * 0.5
-        if(epoch>30):
-            lrate = lrate * 0.5
-        if(epoch>40):
-            lrate = lrate * 0.5
+        # exponential decay (simulated annealing) may converge to 'sharp' global minimum
+        # which generalizes poorly. we use hybrid discrete noise scale falling here.
+        if epoch > 20:
+            lbs = 1000
+        if epoch > 30:
+            lbs = 2000
+        if epoch > 40:
+            lbs = 4000
+        if epoch > 50:
+            lbs = 8000
+        if epoch > 60:
+            lrate = 0.0001
+        if epoch > 70:
+            lrate = 0.00001
+        if epoch > 80:
+            lrate = 0.000001
         
         time_start = time.time()
         part_list = shuffle(range(TRAIN_PARTS))
-        part_n = part_list.shape[0]
+        part_n = len(part_list)
         part_i = 0
 
         for part_ in part_list:
@@ -234,17 +246,17 @@ def training():
             del fid_train
 
             train_data, train_label = shuffle(train_data, train_label)
-            n_batch = train_label.shape[0] // BATCH_SIZE
+            n_batch = train_label.shape[0] // lbs
 
             for i in range(n_batch):
-                start = i * BATCH_SIZE
-                end = start + BATCH_SIZE
-                sess.run(train_op, feed_dict={x:train_data[start:end], t:train_label[start:end], keep_prob:0.8, lrate_p:lrate, mt_p:mt})
+                start = i * lbs
+                end = start + lbs
+                sess.run(train_op, feed_dict={x:train_data[start:end], t:train_label[start:end], keep_prob:DROPOUT_COEFF, lrate_p:lrate, mt_p:mt})
 
             del train_label
             del train_data            
             part_i += 1
-            print('part %d/%d finished'%(part_i,part_n))
+            print('part %d/%d'%(part_i,part_n))
 
         evaluate_cost_val = evaluate_cost(test_datapool, test_labelpool)
         time_end = time.time()
@@ -272,7 +284,8 @@ def training():
 
 
 
-
+training()
+sess.close()
 
 
 
