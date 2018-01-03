@@ -622,20 +622,24 @@ function tensorsize_estimate(specifijson)
         label[:, start[j]:fin[j]] = read(fid[index[j]]["bm"])    
     end
 
-    pathout = joinpath(tempdir(), "tensor.bin")
-    DATA.writebin(pathout, vcat(Float32.(data), Float32.(label)))
+    # =========================output as bin/h5/compressed h5 file===========================
+
+    # pathout = joinpath(tempdir(), "tensor.bin")
+    # DATA.writebin(pathout, vcat(Float32.(data), Float32.(label)))
 
     # option h5:
-    # pathout = joinpath(tempdir(), "tensor.h5")
-    # HDF5.h5write(pathout, "data", Float32.(data))
-    # HDF5.h5write(pathout, "label", Float32.(label))
+    pathout = joinpath(tempdir(), "tensor.h5")
+    HDF5.h5write(pathout, "data", Float32.(data))
+    HDF5.h5write(pathout, "label", Float32.(label))
     
     # option h5 compressed:
     # HDF5.h5open(pathout,"w") do file
     #     file["/"]["data", "shuffle", (), "deflate", 4] = Float32.(data)
     #     file["/"]["label", "shuffle", (), "deflate", 4] = Float32.(label)
     # end
-        
+
+    # =======================================================================================
+
     # estimate number of bytes per group
     bytes = div(filesize(pathout), 10)
     limit = limit * 1024 * 1024
@@ -706,17 +710,21 @@ function tensor(specifijson, ngpp; flag="training")
             UI.update(progress, j, np)
         end
 
-        pathout = joinpath(tensordir, "tensor_$k.bin")
-        DATA.writebin(pathout, vcat(Float32.(data), Float32.(label)))
+        # =========================output as bin/h5/compressed h5 file===========================
+
+        # pathout = joinpath(tensordir, "tensor_$k.bin")
+        # DATA.writebin(pathout, vcat(Float32.(data), Float32.(label)))
         
-        # pathout = joinpath(tensordir, "tensor-$k.h5")
-        # HDF5.h5write(pathout, "data", Float32.(data))
-        # HDF5.h5write(pathout, "label", Float32.(label))
+        pathout = joinpath(tensordir, "tensor_$k.h5")
+        HDF5.h5write(pathout, "data", Float32.(data))
+        HDF5.h5write(pathout, "label", Float32.(label))
 
         # HDF5.h5open(pathout,"w") do file
         #     file["/"]["data", "shuffle", (), "deflate", 4] = Float32.(data)
         #     file["/"]["label", "shuffle", (), "deflate", 4] = Float32.(label)
         # end
+
+        # =======================================================================================
         nothing
     end
 
@@ -750,6 +758,8 @@ function build(spec)
     tensor(spec, groupspart)
     tensor(spec, groupspart, flag="test")
 end
+
+
 
 
 

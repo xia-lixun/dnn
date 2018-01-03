@@ -8,13 +8,31 @@ import time
 
 
 
+BM_BINS = 257
+BM_SPREAD = 24
+HIDDEN_LAYER_WIDTH = 2048
 
-##########################
-#########MODEL##########
-##########################
+N_EPOCHS = 50
+BATCH_SIZE = 5000
+
+TRAIN_ROOT = '/home/coc/5-Workspace/train/tensor_'
+TRAIN_PARTS = 38
+TEST_ROOT = '/home/coc/5-Workspace/test/tensor_'
+TEST_PARTS = 8
+
+MOMENTUM_COEFF = 0.9
+LEARN_RATE_INIT = 0.05
+MATFILE = '/home/coc/5-Workspace/train/specification-2017-12-01.mat'
+
 rng = np.random.RandomState(1234)
+evaluate_cost_opt = 1000000.0
 
 
+
+
+##########################
+##      NOT IN USE      ##
+##########################
 def make_window_buffer(x, neighbor=3):
     m, n = x.shape
     tmp = np.zeros(m * n * (neighbor * 2 + 1), dtype='float32').reshape(m, -1)
@@ -52,9 +70,6 @@ def gen_context(x, neighbor, gmu, gstd):
     return u
 # u: np.zeros([m, 257*8])
 
-
-
-
 class Autoencoder:
 
     def __init__(self, vis_dim, hid_dim, W, function=lambda x: x):
@@ -83,6 +98,13 @@ class Autoencoder:
         return error, reconst_x
 
 
+
+
+
+
+##########################
+##         GRAPH        ##
+##########################
 class Dense:
 
     def __init__(self, in_dim, out_dim, function=lambda x: x):
@@ -90,27 +112,18 @@ class Dense:
         self.b = tf.Variable(np.zeros([out_dim]).astype('float32'))
         self.function = function
         self.params = [self.W, self.b]
-        self.ae = Autoencoder(in_dim, out_dim, self.W, self.function)
+        # self.ae = Autoencoder(in_dim, out_dim, self.W, self.function)
 
     def f_prop(self, x):
         u = tf.matmul(x, self.W) + self.b
         self.z = self.function(u)
         return self.z
 
-    def pretrain(self, x, noise):
-        cost, reconst_x = self.ae.reconst_error(x, noise)
-        return cost, reconst_x
+    # def pretrain(self, x, noise):
+    #    cost, reconst_x = self.ae.reconst_error(x, noise)
+    #    return cost, reconst_x
 
 
-layers = [
-    Dense(257*12, 2048, tf.nn.sigmoid),
-    Dense(2048, 2048, tf.nn.sigmoid),
-    Dense(2048, 2048, tf.nn.sigmoid),
-    Dense(2048, 257, tf.nn.sigmoid)
-]
-keep_prob = tf.placeholder(tf.float32)
-x = tf.placeholder(tf.float32, [None, 257*12])
-t = tf.placeholder(tf.float32, [None, 257])
 
 def f_props(layers, x):
     for i, layer in enumerate(layers):
@@ -118,141 +131,144 @@ def f_props(layers, x):
         if(i != len(layers)-1):
             x = tf.nn.dropout(x, keep_prob)
     return x
+
+
+
+
+layers = [
+    Dense(BM_BINS*BM_SPREAD, HIDDEN_LAYER_WIDTH, tf.nn.sigmoid),
+    Dense(HIDDEN_LAYER_WIDTH, HIDDEN_LAYER_WIDTH, tf.nn.sigmoid),
+    Dense(HIDDEN_LAYER_WIDTH, HIDDEN_LAYER_WIDTH, tf.nn.sigmoid),
+    Dense(HIDDEN_LAYER_WIDTH, BM_BINS, tf.nn.sigmoid)
+]
+
+keep_prob = tf.placeholder(tf.float32)
+x = tf.placeholder(tf.float32, [None, BM_BINS*BM_SPREAD])
+t = tf.placeholder(tf.float32, [None, BM_BINS])
 y = f_props(layers, x)
-
-#cost_fine = tf.reduce_mean(tf.reduce_sum((y - t)**2, 1))
-cost_fine = tf.reduce_mean(tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(labels=t, logits=y), 1))
-
 lrate_p = tf.placeholder(tf.float32)
 mt_p = tf.placeholder(tf.float32)
-train_fine = tf.train.MomentumOptimizer(learning_rate=lrate_p, momentum=mt_p).minimize(cost_fine)
-saver = tf.train.Saver()
+
+# cost = tf.reduce_mean(tf.reduce_sum((y - t)**2, 1))
+cost_op = tf.reduce_mean(tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(labels=t, logits=y), 1))
+train_op = tf.train.MomentumOptimizer(learning_rate=lrate_p, momentum=mt_p).minimize(cost_op)
+
+# saver = tf.train.Saver()
 sess = tf.Session()
-init = tf.global_variables_initializer()
-sess.run(init)
+sess.run(tf.global_variables_initializer())
 
 
-n_epochs = 50
-batch_size = 128
-part_num_train = 20
-part_num_valid = 10
-
-
-##########################
-#########DATA#############
-##########################
-
-
-
-
-
-##########################
-#########PROCESS##########
-##########################
-print("FineTuning begin")
-cost_valid_best = 1000000
-
-
-Cost_validation = 0.0
-for part_num_ in range(part_num_valid):
-    # note: in h5 data are in N x 257/2056 format	
-    #       transpose to maintain the format unchanged for tf
-    fid_valid = h5py.File('/home/coc/5-Workspace/test/tensor-' + str(part_num_) + '.h5')
-    t_valid_data = np.array(fid_valid["/data"], dtype='float32')
-    t_valid_label = np.array(fid_valid["/label"], dtype='float32')
-    del fid_valid
-    
-    Cost_validation = Cost_validation + sess.run(cost_fine, feed_dict={x: t_valid_data, t: t_valid_label, keep_prob: 1.0})
-    del t_valid_data
-    del t_valid_label
-Cost_validation = Cost_validation / part_num_valid
-print('EPOCH: 0, Validation cost: %.3f ' % (Cost_validation))
-
-
-
-
-# training starts here
-for epoch in range(n_epochs):
-    mt = 0.9
-    lrate = 0.001
-    #if(epoch>3):
-    #    lrate = 0.0005
-    #if(epoch>10):
-    #    lrate = 0.0002
-    # if(epoch>20):
-    #    lrate = 0.0001
-    if(epoch>10):
-        lrate = 0.0005
-
-
-    time_start = time.time()
-    part_num_list = shuffle(range(part_num_train))
-
-    for part_num in part_num_list:
-        try:
-            del data_part
-            del _data
-            del _label
-        except:
-            pass
-
-        data_part = h5py.File('/home/coc/5-Workspace/train/tensor-' + str(part_num) + '.h5')
-        _data = np.array(data_part["/data"], dtype='float32')
-        _label = np.array(data_part["/label"], dtype='float32')
-        del data_part
-
-        _data, _label = shuffle(_data, _label)
-        n_batches = _data.shape[0] // batch_size
-
-        for i in range(n_batches):
-            start = i * batch_size
-            end = start + batch_size
-            sess.run(train_fine, feed_dict={x: _data[start:end], t: _label[start:end], keep_prob: 0.8, lrate_p: lrate, mt_p: mt})
-        print('part %i finished'%(part_num))
-
-    #Cost_validation = sess.run(cost_fine, feed_dict={x: t_valid_data, t: t_valid_label, keep_prob: 1.0})
-    Cost_validation = 0.0
-    for part_num_ in range(part_num_valid):
-        # note: in h5 data are in N x 257/2056 format	
-        #       transpose to maintain the format unchanged for tf
-        fid_valid = h5py.File('/home/coc/5-Workspace/test/tensor-' + str(part_num_) + '.h5')
-        t_valid_data = np.array(fid_valid["/data"], dtype='float32')
-        t_valid_label = np.array(fid_valid["/label"], dtype='float32')
-        del fid_valid
-    
-        Cost_validation = Cost_validation + sess.run(cost_fine, feed_dict={x: t_valid_data, t: t_valid_label, keep_prob: 1.0})
-        del t_valid_data
-        del t_valid_label
-    Cost_validation = Cost_validation / part_num_valid
-
-    time_end = time.time()
-    print('EPOCH: %i, Validation cost: %.3f ' % (epoch + 1, Cost_validation))
-    print('Elapsed time for one epoch is %.3f' % (time_end - time_start))
-    #LOG.write('EPOCH: %i, Validation cost: %.3f \n' %(epoch + 1, Cost_validation))
-    #LOG.flush()
-
-    if (Cost_validation < cost_valid_best):
-        save_dict = {}
-        save_dict['W1'] = sess.run(layers[0].W)
-        save_dict['b1'] = sess.run(layers[0].b)
-        save_dict['W2'] = sess.run(layers[1].W)
-        save_dict['b2'] = sess.run(layers[1].b)
-        save_dict['W3'] = sess.run(layers[2].W)
-        save_dict['b3'] = sess.run(layers[2].b)
-        save_dict['W4'] = sess.run(layers[3].W)
-        save_dict['b4'] = sess.run(layers[3].b)
-
-        MATFILE = '/home/coc/5-Workspace/train/specification-2017-12-01.mat'
-        scio.savemat(MATFILE, save_dict)
-        cost_valid_best = Cost_validation
-        print('Model in EPOCH:%d is saved' % (epoch + 1))
-        #LOG.write('Model in EPOCH:%d is saved' % (epoch + 1))
-    saver.save(sess, '/home/coc/5-Workspace/train/specification-2017-12-01.tf')
-
-#LOG.close()
-del _data
-del _label
 sess.close()
+
+
+
+
+
+##########################
+##      PROCESSING      ##
+##########################
+
+def load_dataset_to_mem(path, n_parts):
+    # h5 data are in (BM_BINS * BM_SPREAD)-by-Frames shape
+    # loaded with h5py with auto tranpose into tensor shape
+    data_pool = []
+    label_pool = [] 
+
+    for p_ in range(n_parts):
+        fid = h5py.File(path + str(p_) + '.h5')
+        data = np.array(fid["/data"], dtype='float32')
+        label = np.array(fid["/label"], dtype='float32')
+        data_pool.append(data)
+        label_pool.append(label)
+        del label
+        del data
+        del fid
+    data_pool = np.asarray(data_pool)
+    label_pool = np.asarray(label_pool)
+    return data_pool, label_pool
+
+
+def evaluate_cost(data_pool, label_pool):
+    n = label_pool.shape[0]
+    cost_part = np.zeros((n))
+    for i in range(n):
+        cost_part[i] = sess.run(cost_op, feed_dict={x:data_pool[i], t:label_pool[i], keep_prob:1.0})
+    cost_eval = np.mean(cost_part)
+    return cost_eval
+
+
+
+
+
+
+def training():
+
+    mt = MOMENTUM_COEFF
+    lrate = LEARN_RATE_INIT
+
+    test_datapool, test_labelpool = load_dataset_to_mem(TEST_ROOT, TEST_PARTS)
+    evaluate_cost_val = evaluate_cost(test_datapool, test_labelpool)
+    print('[init]: validation cost: %.3f ' % (evaluate_cost_val))
+
+    for epoch in range(N_EPOCHS):
+        
+        # simulated annealing
+        if(epoch>10):
+            lrate = lrate * 0.5
+        if(epoch>20):
+            lrate = lrate * 0.5
+        if(epoch>30):
+            lrate = lrate * 0.5
+        if(epoch>40):
+            lrate = lrate * 0.5
+        
+        time_start = time.time()
+        part_list = shuffle(range(TRAIN_PARTS))
+        part_n = part_list.shape[0]
+        part_i = 0
+
+        for part_ in part_list:
+            fid_train = h5py.File(TRAIN_ROOT + str(part_) + '.h5')
+            train_data = np.array(fid_train["/data"], dtype='float32')
+            train_label = np.array(fid_train["/label"], dtype='float32')
+            del fid_train
+
+            train_data, train_label = shuffle(train_data, train_label)
+            n_batch = train_label.shape[0] // BATCH_SIZE
+
+            for i in range(n_batch):
+                start = i * BATCH_SIZE
+                end = start + BATCH_SIZE
+                sess.run(train_op, feed_dict={x:train_data[start:end], t:train_label[start:end], keep_prob:0.8, lrate_p:lrate, mt_p:mt})
+
+            del train_label
+            del train_data            
+            part_i += 1
+            print('part %d/%d finished'%(part_i,part_n))
+
+        evaluate_cost_val = evaluate_cost(test_datapool, test_labelpool)
+        time_end = time.time()
+        print('[epoch %i] validation cost = %.3f ' % (epoch + 1, evaluate_cost_val))
+        print('[epoch %i] time = %.3f (sec)' % (epoch + 1, time_end - time_start))
+
+        if (evaluate_cost_val < evaluate_cost_opt):
+            save_dict = {}
+            save_dict['W1'] = sess.run(layers[0].W)
+            save_dict['b1'] = sess.run(layers[0].b)
+            save_dict['W2'] = sess.run(layers[1].W)
+            save_dict['b2'] = sess.run(layers[1].b)
+            save_dict['W3'] = sess.run(layers[2].W)
+            save_dict['b3'] = sess.run(layers[2].b)
+            save_dict['W4'] = sess.run(layers[3].W)
+            save_dict['b4'] = sess.run(layers[3].b)
+
+            scio.savemat(MATFILE, save_dict)
+            evaluate_cost_opt = evaluate_cost_val
+            print('[epoch %d] model saved' % (epoch + 1))
+
+    del test_labelpool
+    del test_datapool
+
 
 
 
