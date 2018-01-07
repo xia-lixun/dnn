@@ -75,9 +75,9 @@ end
 # resample entire folder to another while maintain folder structure
 # 1. need ffmpeg installed as backend
 # 2. need sox install as resample engine
-function resample(path_i::String, path_o::String, target_fs)
+function resample(path_i::String, path_o::String, target_fs; source_type=".wav")
     
-    a = list(path_i, t = ".wav")
+    a = list(path_i, t = source_type)
     n = length(a)
     u = Array{Int64,1}(n)
     
@@ -87,7 +87,7 @@ function resample(path_i::String, path_o::String, target_fs)
         run(`ffmpeg -y -i $j $tm`)
         p = joinpath(path_o, relpath(dirname(j), path_i))
         mkpath(p)
-        p = joinpath(p, basename(j))
+        p = joinpath(p, replace(basename(j), source_type, ".wav"))
         run(`sox $tm -r $(target_fs) $p`)
                 
         x, fs = WAV.wavread(p)
