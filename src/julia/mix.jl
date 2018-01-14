@@ -106,6 +106,46 @@ function build_level_index(path, rate)
 end
 
 
+function build_level_json(path, rate::Int64)
+
+    a = DATA.list(path, t=".wav")
+    d = Dict{String,Any}()
+    d["DATA"] = Dict{String,Any}()
+
+    lmin = typemax(Int64)
+    lmax = 0
+    lsum = 0
+
+    # wav must be monochannel and fs==rate
+    for i in a
+        try
+            x, fs = WAV.wavread(i)
+            assert(typeof(rate)(fs) == rate)
+            assert(size(x,2) == 1)
+
+            y = view(x,:,1)
+            n = length(y)
+            d["DATA"][relpath(i, path)] = Dict("peak"=>maximum(abs.(y)), "rms"=>FEATURE.rms(y), "median"=>median(abs.(y)), "samples"=>n)
+            n < lmin && (lmin = n)
+            n > lmax && (lmax = n)
+            lsum += n
+        catch
+            warn(i)
+        end
+    end
+    d["META"] = Dict("len_min"=>lmin, "len_max"=>lmax, "len_sum"=>lsum, "sample_rate"=>rate)
+    
+    index = joinpath(path, "level.json")
+    open(index, "w") do f
+        write(f,JSON.json(d))
+    end
+    info("index written to $index")
+    nothing
+end
+
+
+
+
 
 
 
@@ -140,7 +180,7 @@ end
 
 
 
-function wavgen(s, noiselevel, noisesplit, voicelevel, voicesplit; flag="training")
+function wavgen(s, nle, nsp, vle, vsp; flag="training")
 
     n_train::Int64 = s["training_samples"]
     n_test::Int64 = s["test_samples"]
@@ -164,42 +204,41 @@ function wavgen(s, noiselevel, noisesplit, voicelevel, voicesplit; flag="trainin
     n = (flag=="training")? n_train:n_test
     n_count = 1
 
-    q = length(voicesplit)
+    q = length(vsp)
     p = Int64(round(split * q))
-    voicesplit_train = view(voicesplit, 1:p)
-    voicesplit_test = view(voicesplit, p+1:q)
+    vsp_train = view(vsp, 1:p)
+    vsp_test = view(vsp, p+1:q)
 
 
     for cat in noisecat
 
         i_n = Int64(round(cat["percent"] * 0.01 * n))
-
         cname = cat["name"]
-        q = length(noisesplit[cname])
+        q = length(nsp[cname])
         p = Int64(round(split * q))
-        noisesplit_train = view(noisesplit[cname], 1:p)
-        noisesplit_test = view(noisesplit[cname], p+1:q)
+        nsp_train = view(nsp[cname], 1:p)
+        nsp_test = view(nsp[cname], p+1:q)
 
         for j = 1:i_n
 
-                # preparation of randomness
+                # prepare randomness
                 voice_spl_tt::Float64 = rand(spl)
                 snr_tt::Float64 = rand(snr)
-                rn_voice::Int64 = (flag=="training")? rand(voicesplit_train):rand(voicesplit_test)
-                rn_noise::Int64 = (flag=="training")? rand(noisesplit_train):rand(noisesplit_test)
+                rn_voice = (flag=="training")? rand(vsp_train) : rand(vsp_test)
+                rn_noise = (flag=="training")? rand(nsp_train) : rand(nsp_test)
 
                 # addressing parameters based on generated randomness
-                voice_wav::String = voicelevel[rn_voice,1]
-                voice_lpk::Float64 = voicelevel[rn_voice,2]
-                voice_spl::Float64 = voicelevel[rn_voice,3]
-                voice_len::Int64 = voicelevel[rn_voice,4]
+                voice_wav::String = joinpath(voice, rn_voice)
+                voice_lpk::Float64 = vle["DATA"][rn_voice]["peak"]
+                voice_spl::Float64 = vle["DATA"][rn_voice]["dBrms"]
+                voice_len::Int64 = vle["DATA"][rn_voice]["samples"]
 
-                block = noiselevel[cname]
-                noise_wav::String = block[rn_noise,1]
-                noise_lpk::Float64 = block[rn_noise,2]
-                noise_rms::Float64 = block[rn_noise,3]
-                noise_med::Float64 = block[rn_noise,4]
-                noise_len::Int64 = block[rn_noise,5]
+                block = nle[cname]
+                noise_wav::String = joinpath(noise, cname, rn_noise)
+                noise_lpk::Float64 = block["DATA"][rn_noise]["peak"]
+                noise_rms::Float64 = block["DATA"][rn_noise]["rms"]
+                noise_med::Float64 = block["DATA"][rn_noise]["median"]
+                noise_len::Int64 = block["DATA"][rn_noise]["samples"]
 
                 # record the gains applied to speech and noise
                 gain_ = zeros(2)
@@ -210,8 +249,8 @@ function wavgen(s, noiselevel, noisesplit, voicelevel, voicesplit; flag="trainin
                 x = view(x1,:,1)
 
                 g = 10^((voice_spl_tt-voice_spl)/20)
-                if g * voice_lpk > 1
-                    g = 1 / voice_lpk
+                if g * voice_lpk > 0.999
+                    g = 0.999 / voice_lpk
                     voice_spl_tt = voice_spl + 20log10(g+eps())
                     info("voice avoid clipping $(voice_wav):$(voice_spl)->$(voice_spl_tt) dB")
                 end
@@ -236,8 +275,8 @@ function wavgen(s, noiselevel, noisesplit, voicelevel, voicesplit; flag="trainin
                 else
                     error("wrong type in $(i["name"])")
                 end
-                if g * noise_lpk > 1
-                     g = 1 / noise_lpk
+                if g * noise_lpk > 0.999
+                     g = 0.999 / noise_lpk
                      info("noise avoid clipping $(noise_wav)")
                 end
                 u .= g .* u
@@ -245,12 +284,8 @@ function wavgen(s, noiselevel, noisesplit, voicelevel, voicesplit; flag="trainin
 
 
                 # voice-noise time ratio control
-                noise_id = replace(relpath(noise_wav,noise), "\\", "+")[1:end-4]
-                voice_id = replace(relpath(voice_wav,voice), "\\", "+")[1:end-4]
-                # D:\5-Workspace\GoogleAudioSet\Aircraft\m0k5j+_GcfZXqPJf4.wav -> Aircraft + m0k5j+_GcfZXqPJf4
-                # D:\4-Workspace\Voice\TIMIT-16k\dr1\fcjf0\sa1.wav  -> TIMIT-16k + dr1 + fcjf0 + sa1
-                # D:\5-Workspace\Voice\LP7-16k\CA\CA01_01.wav -> LP7-16k + CA + CA01_01
-
+                noise_id = replace(relpath(noise_wav,noise), ['/', '\\'], "+")[1:end-4]
+                voice_id = replace(relpath(voice_wav,voice), ['/', '\\'], "+")[1:end-4]
 
                 pathout = joinpath(mixwav,"$(n_count)+$(noise_id)+$(voice_id)+$(voice_spl_tt)+$(snr_tt).wav")
                 gain[pathout] = gain_
@@ -354,7 +389,7 @@ function mix(specifijson::String)
     root::String = s["root"]
     voice::String = s["voice_depot"]
     noise::String = s["noise_depot"]
-    noisecat::Array{Dict{String,Any},1} = s["noise_categories"]
+    ncat::Array{Dict{String,Any},1} = s["noise_categories"]
 
 
     # 1. remove existing wav file in the mix folder
@@ -363,51 +398,37 @@ function mix(specifijson::String)
     end
 
 
-    # 2. detect data change and update level information
+    # 2. detect noise depot change and update level information
     !isdir(noise) && error("noise depot doesn't exist")
     sumpercent = 0.0
-    for i in noisecat
+    for i in ncat
         catpath = joinpath(noise,i["name"])
         if !DATA.verify_checksum(catpath)
             info("checksum mismatch: updating level index...")
-            build_level_index(catpath, fs)
+            build_level_json(catpath, fs)
             DATA.update_checksum(catpath)
         end
         sumpercent += i["percent"]
     end
     assert(99.999 < sumpercent < 100.001)
-
-    # 2. noise level indexing format:
-    # noiselevel["class-name"][:,1] = path-to-wav
-    # noiselevel["class-name"][:,2] = level-peak
-    # noiselevel["class-name"][:,3] = level-rms
-    # noiselevel["class-name"][:,4] = level-median
-    # noiselevel["class-name"][:,5] = length-in-samples
-    noiselevel = Dict(x["name"] => readdlm(joinpath(noise, x["name"],"index.level"), ',') for x in noisecat)
-    noisesplit = Dict(x["name"] => randperm(size(noiselevel[x["name"]],1)) for x in noisecat)
+    nle = Dict(x["name"] => JSON.parsefile(joinpath(noise, x["name"], "level.json")) for x in ncat)
+    nsp = Dict(x => shuffle([y for y in keys(nle[x]["DATA"])]) for x in keys(nle))
 
 
-    # 3. build speech level and check speech integrety
+    # 3. check speech integrety and build speech level
     !isdir(voice) && error("voice depot doesn't exist")
     if !DATA.verify_checksum(voice)
-        # build_level_index(s["speech_rootpath"])
-        # assume index ready by Matlab:activlevg() and provided as csv in format:
-        # path-to-wav, speech-level(dB), length-in-samples
+        # this part is built via matlab scripts, migrade to julia soon
         DATA.update_checksum(voice)
     end
-
-    # 4. speech level indexing format:
-    # voicelevel[:,1] = path-to-wav
-    # voicelevel[:,2] = peak-level
-    # voicelevel[:,3] = speech-level(dB)
-    # voicelevel[:,4] = length-in-samples
-    voicelevel = readdlm(joinpath(voice,"index.level"), ',', header=false, skipstart=3)
-    voicesplit = randperm(size(voicelevel,1))
+    vle = JSON.parsefile(joinpath(voice,"level.json"))
+    vsp = shuffle([y for y in keys(vle["DATA"])])
 
 
-    # 5. mixing'em up
-    wavgen(s, noiselevel, noisesplit, voicelevel, voicesplit)
-    wavgen(s, noiselevel, noisesplit, voicelevel, voicesplit, flag="test")
+    # 5. mixing up
+    wavgen(s, nle, nsp, vle, vsp)
+    wavgen(s, nle, nsp, vle, vsp, flag="test")
+
     nothing
 end
 
@@ -495,8 +516,9 @@ function feature(specifijson::String; flag="training")
         𝕏n, h = STFT2.stft2(x_purenoise, m, hp, STFT2.sqrthann)
         bm = abs.(𝕏v) ./ (abs.(𝕏v) + abs.(𝕏n))
 
-        HDF5.h5write(output, "$v/bm", bm)
-        HDF5.h5write(output, "$v/mix", abs.(𝕏m))
+        bv = basename(v)
+        HDF5.h5write(output, "$(bv)/bm", bm)
+        HDF5.h5write(output, "$(bv)/mix", abs.(𝕏m))
         UI.update(progress, i, n)
     end
     info("feature written to $(output)")
@@ -510,68 +532,68 @@ end
 
 # global variance:
 # remove old global.h5 and make new
-function statistics(specifijson)
+function statistics(specifijson; flag="training")
 
     # read the specification for feature extraction
     s = JSON.parsefile(specifijson)
     root = s["root"]
     m = div(s["feature"]["frame_length"], 2) + 1
 
-    pathstat = joinpath(root,"training","stat.h5")
+    pathstat = joinpath(root, flag, "stat.h5")
     rm(pathstat, force=true)
 
-    fid = HDF5.h5open(joinpath(root,"training","spectrum.h5"),"r")
+    fid = HDF5.h5open(joinpath(root, flag, "spectrum.h5"),"r")
     l = length(names(fid))
 
-    # get total frame count of training set
+    # get total frame count of training/test set
     n = zero(Int128)
-    progress = UI.Progress(10)
     for (i,j) in enumerate(names(fid))
         n += size(read(fid[j]["mix"]), 2)
-        UI.update(progress, i, l)
     end
-    info("global spectrum count(training): $n")
-
-    # get total frame count of validation set
-    fidv = HDF5.h5open(joinpath(root,"test","spectrum.h5"),"r")
-    lv = length(names(fidv))
-    nv = zero(Int128)
-    UI.rewind(progress)
-    for (i,j) in enumerate(names(fidv))
-        nv += size(read(fidv[j]["mix"]), 2)
-        UI.update(progress, i, lv)
-    end
-    info("global spectrum count(validation): $nv")
-    close(fidv)
+    info("global spectrum count($(flag)): $n")
 
 
     # get global mean log power spectrum
     μ = zeros(m)
     σ = zeros(m)
+    bm = zeros(m)
     μi = zeros(BigFloat, m, l)
 
-    UI.rewind(progress)
-    for (i,j) in enumerate(names(fid))
-        x = read(fid[j]["mix"])
-        for k = 1:m
-            μi[k,i] = sum_kbn(view(x,k,:))
+    function average!(feature::String, dest::Array{Float64,1})
+        for (i,j) in enumerate(names(fid))
+            x = read(fid[j][feature])
+            for k = 1:m
+                μi[k,i] = sum_kbn(view(x,k,:))
+            end
         end
-        UI.update(progress, i, l)
+        for k = 1:m
+            dest[k] = sum_kbn(view(μi,k,:))/n
+        end
+        nothing
     end
-    for k = 1:m
-        μ[k] = sum_kbn(view(μi,k,:))/n
-    end
+
+    # UI.rewind(progress)
+    # for (i,j) in enumerate(names(fid))
+    #     x = read(fid[j]["mix"])
+    #     for k = 1:m
+    #         μi[k,i] = sum_kbn(view(x,k,:))
+    #     end
+    #     UI.update(progress, i, l)
+    # end
+    # for k = 1:m
+    #     μ[k] = sum_kbn(view(μi,k,:))/n
+    # end
+    average!("mix", μ)
+    average!("bm", bm)
     info("global spectrum μ (dimentionless): $(mean(μ))")
+    info("global irm μ (dimentionless): $(mean(bm))")
 
     # get global std for unit variance
-    fill!(μi, zero(BigFloat))
-    UI.rewind(progress)
     for(i,j) in enumerate(names(fid))
         x = read(fid[j]["mix"])
         for k = 1:m
             μi[k,i] = sum_kbn((view(x,k,:)-μ[k]).^2)
         end
-        UI.update(progress, i, l)
     end
     for k = 1:m
         σ[k] = sqrt(sum_kbn(view(μi,k,:))/(n-1))
@@ -580,8 +602,8 @@ function statistics(specifijson)
 
     HDF5.h5write(pathstat, "mu", μ)
     HDF5.h5write(pathstat, "std", σ)
-    HDF5.h5write(pathstat, "frames_training", Int64(n))
-    HDF5.h5write(pathstat, "frames_validation", Int64(nv))
+    HDF5.h5write(pathstat, "bm", bm)
+    HDF5.h5write(pathstat, "frames", Int64(n))
     assert(n < typemax(Int64))
     info("global results written to $(pathstat)")
 
@@ -754,6 +776,7 @@ function build(spec)
     feature(spec)
     feature(spec, flag="test")
     statistics(spec)
+    statistics(spec, flag="test")
     groupspart = tensorsize_estimate(spec)
     tensor(spec, groupspart)
     tensor(spec, groupspart, flag="test")
