@@ -5,8 +5,20 @@ module DATA
 import WAV
 import SHA
 
-
 include("ui.jl")
+
+
+
+
+# Deprecated! -> randstring()
+# function rand_alphanum(n::Int64)
+#     an = collect("0123456789_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+#     x = Array{Char,1}(n)
+#     for i = 1:n
+#         x[i] = rand(an)
+#     end
+#     String(x)
+# end
 
 
 
@@ -81,9 +93,10 @@ function resample(path_i::String, path_o::String, target_fs; source_type=".wav")
     n = length(a)
     u = Array{Int64,1}(n)
     
-    tm = joinpath(tempdir(), "a.wav")
+    name = randstring(rand(4:32))
+    tm = joinpath(tempdir(), "$(name).wav")
+    
     for (i, j) in enumerate(a)
-
         run(`ffmpeg -y -i $j $tm`)
         p = joinpath(path_o, relpath(dirname(j), path_i))
         mkpath(p)
@@ -96,9 +109,9 @@ function resample(path_i::String, path_o::String, target_fs; source_type=".wav")
         info("$i/$n complete")
     end
 
+    rm(tm, force = true)
     info("max: $(maximum(u) / target_fs) seconds")
     info("min: $(minimum(u) / target_fs) seconds")
-    rm(tm, force = true)
     nothing
 end
 
