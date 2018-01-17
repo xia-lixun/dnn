@@ -25,6 +25,11 @@ n_speech = length(layout.speech.path);
 n_speech_train = round(n_speech * s.split_ratio_for_training);
 
 
+% gain/lable/source control
+gain = container.Map;
+source = container.Map;
+
+
 % going through each noise group
 for i = 1:length(layout.noise)
     
@@ -90,6 +95,15 @@ for i = 1:length(layout.noise)
         u = u * g;
         gains(2) = g;
         
+        
+        % speech-noise time control
+        speech_id = replace(speech_path(length(s.speech)+1:end), '\', '+');
+        noise_id = replace(noise_path(length(s.noise)+1:end), '\', '+');
+        path_out = [s.root '\' num2str(n_mix_count) '+' noise_id(1:end-4) '+' speech_id(1:end-4) '+' num2str(spl_db) '+' num2str(snr) '.wav'];
+        
+        gain(path_out) = gains;
+        source(path_out) = [{speech_path} {noise_path}];
+        eta = speech_length / noise_length;
         
     end
 end
