@@ -1,17 +1,26 @@
 % data mixing scripts for selective noise reduction
 % lixun.xia2@harman.com
 % 2018-01-16
-function m = mix(s)
+function y = mix()
+    s = specification();
+    data = index(s);
+    y = generate_wav(s, data, 'training');
+end
 
-% setup the initial random number generator for repetitive sequence
+
+
+function m = index(s)
+% build speech/noise data layout for mixing.
+
 rng(s.random_seed);
-
+tmp = rand(100);
+clear tmp;
 
 % populate noise group folders and calculate levels
 for i = 1:length(s.noisegroup)
+    
     path_group = fullfile(s.noise, s.noisegroup(i).name);
     group =  dir([path_group '/**/*.wav']);
-
     % populate noise examples and shuffle the sequence within each group
     for j = 1:length(group)    
         layout.noise(i).path(j) = cellstr(fullfile(group(j).folder, group(j).name));  
@@ -20,6 +29,7 @@ for i = 1:length(s.noisegroup)
     
     % calculate the levels of the shuffled examples
     for j = 1:length(group)
+        
         [x, fs] = audioread(layout.noise(i).path{j});
         assert(fs == s.sample_rate)
         assert(size(x,2) == 1)
@@ -34,7 +44,7 @@ end
 
 % load clean speech level info
 fid = fopen(fullfile(s.speech, 'index.level'));
-c = textscan(fid, '%s %f %f %d', 'Delimiter',',', 'CommentStyle','#');
+c = textscan(fid, '%s %f %f %f', 'Delimiter',',', 'CommentStyle','#');
 fclose(fid);
 
 shuffle = randperm(length(c{1}));
