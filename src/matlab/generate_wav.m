@@ -1,8 +1,8 @@
 function mix_info = generate_wav(s, layout, flag)
 
-if flag == 'training'
+if strcmp(flag, 'training')
     n_mix = s.training_examples;
-elseif flag == 'testing'
+elseif strcmp(flag, 'testing')
     n_mix = s.testing_examples;
 else
     error('flag = <training/testing>');
@@ -11,11 +11,17 @@ n_mix_count = 1;
 
 
 % prepare the folder structure
-mkdir(s.root);
+if ~exist(s.root, 'dir')
+    mkdir(s.root);
+end
 path_tt = fullfile(s.root, flag);
-mkdir(path_tt);
+if ~exist(path_tt, 'dir')
+    mkdir(path_tt);
+end
 path_tt_wav = fullfile(path_tt, 'wav');
-mkdir(path_tt_wav);
+if ~exist(path_tt_wav, 'dir')
+    mkdir(path_tt_wav);
+end
 delete(fullfile(path_tt_wav, '*.wav'));
 
 
@@ -36,10 +42,10 @@ for i = 1:length(layout.noise)
         
         spl_db = randselect(s.speech_level_db);
         snr = randselect(s.snr);
-        if flag == 'training' 
+        if strcmp(flag, 'training')
             speech_rn = randi([1 n_speech_train]);
             noise_rn = randi([1 n_noise_train]);
-        elseif flag == 'testing'
+        elseif strcmp(flag, 'testing')
             speech_rn = randi([n_speech_train+1 n_speech]);
             noise_rn = randi([n_noise_train+1 n_noise]);
         end
@@ -93,15 +99,6 @@ for i = 1:length(layout.noise)
         u = u * g;
         gains(2) = g;
         
-        
-        % speech-noise time control
-        speech_id = replace(speech_path(length(s.speech)+1:end), '\', '+');
-        noise_id = replace(noise_path(length(s.noise)+1:end), '\', '+');
-        path_out = [s.root '\' num2str(n_mix_count) '+' noise_id(1:end-4) '+' speech_id(1:end-4) '+' num2str(spl_db) '+' num2str(snr) '.wav'];
-        
-        gain(path_out) = gains;
-        source(path_out) = [{speech_path} {noise_path}];
-        eta = speech_length / noise_length;
         
         % speech-noise time ratio control
         noise_id = path2id(noise_path, s.noise);
@@ -179,10 +176,6 @@ for i = 1:length(layout.noise)
     end
 end
 
-fid = fopen(fullfile(s.root, flag, 'mix_info.json'),'w');
-fprintf(fid, jsonencode(mix_info));
-fclose(fid);
-
 end
 
 
@@ -201,16 +194,6 @@ function y = path2id(path, root)
 m = length(root);
 n = length('.wav');
 y = replace(path(m+1:end-n),'\', '+');
-end
-
-
-function y = cyclic_extend(x, n)
-% x y belongs to 1-d array
-    y = zeros(n,1);
-    m = length(x);
-    for i = 1:n
-        y(i) = x(mod((i-1), m) + 1);
-    end
 end
 
 

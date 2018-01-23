@@ -6,8 +6,8 @@ close all
 %% load signal
 % [x1,fs] = wavread('sound001.wav');
 % [x2,fs] = wavread('sound002.wav');
-[x1,fs] = wavread('original_speech2.wav');
-[x2,fs] = wavread('original_noise2.wav');
+[x1,fs] = audioread('original_speech2.wav');
+[x2,fs] = audioread('original_noise2.wav');
 M = min(length(x1),length(x2));
 x1 = x1(1:M);
 x2 = x2(1:M);

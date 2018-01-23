@@ -1,11 +1,29 @@
 % data mixing scripts for selective noise reduction
 % lixun.xia2@harman.com
 % 2018-01-16
-function y = mix()
+function [train_label, test_label] = mix()
     s = specification();
     data = index(s);
-    y = generate_wav(s, data, 'training');
+    
+    train_label = generate_wav(s, data, 'training');
+    test_label = generate_wav(s, data, 'testing');
+    save2json(train_label, fullfile(s.root, 'training', 'info.json'));
+    save2json(test_label, fullfile(s.root, 'testing', 'info.json'));
+    
+    train_frames = feature(s, train_label, 'training');
+    test_frames = feature(s, test_label, 'testing');
+    
+    [mu_bm_train, mu_spec_train, std_bm_train, std_spec_train] = statistics(s, train_frames, 'training');
+    [mu_bm_test, mu_spec_test, std_bm_test, std_spec_test] = statistics(s, train_frames, 'testing');
+    
+    
 end
+
+
+
+
+
+
 
 
 
@@ -63,3 +81,11 @@ layout.speech.length = layout.speech.length(shuffle);
 m = layout;
 end
 
+
+
+function save2json(object, path)
+% save struct object to json
+    fid = fopen(path,'wt');
+    fprintf(fid, jsonencode(object));
+    fclose(fid);
+end
