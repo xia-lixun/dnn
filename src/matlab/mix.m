@@ -1,7 +1,8 @@
-% data mixing scripts for selective noise reduction
+% data mixing scripts for dnn speech enhancement
 % lixun.xia2@harman.com
 % 2018-01-16
-function [train_label, test_label] = mix()
+function [data, train_label, test_label] = mix()
+
     s = specification();
     data = index(s);
     
@@ -10,13 +11,14 @@ function [train_label, test_label] = mix()
     save2json(train_label, fullfile(s.root, 'training', 'info.json'));
     save2json(test_label, fullfile(s.root, 'testing', 'info.json'));
     
-    train_frames = feature(s, train_label, 'training');
-    test_frames = feature(s, test_label, 'testing');
+    train_frames = generate_feature(s, train_label, 'training');
+    test_frames = generate_feature(s, test_label, 'testing');
     
     [mu_bm_train, mu_spec_train, std_bm_train, std_spec_train] = statistics(s, train_frames, 'training');
-    [mu_bm_test, mu_spec_test, std_bm_test, std_spec_test] = statistics(s, train_frames, 'testing');
+    [mu_bm_test, mu_spec_test, std_bm_test, std_spec_test] = statistics(s, test_frames, 'testing');
     
-    
+    tensor(s, mu_spec_train, std_spec_train, 'training');
+    tensor(s, mu_spec_train, std_spec_train, 'testing');
 end
 
 

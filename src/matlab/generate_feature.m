@@ -1,4 +1,4 @@
-function n_frames = feature(s, label, flag)
+function n_frames = generate_feature(s, label, flag)
     % s: specification
     % train_info: labeling info of the training dataset
     % test_info: labeling info of the testing dataset
