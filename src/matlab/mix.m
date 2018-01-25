@@ -1,24 +1,31 @@
 % data mixing scripts for dnn speech enhancement
 % lixun.xia2@harman.com
 % 2018-01-16
-function [data, train_label, test_label] = mix()
+function [data, train_label, test_label, train_log, test_log] = mix()
 
     s = specification();
     data = index(s);
     
-    train_label = generate_wav(s, data, 'training');
-    test_label = generate_wav(s, data, 'testing');
+    [train_label, train_log] = generate_wav(s, data, 'training');
+    [test_label, test_log] = generate_wav(s, data, 'testing');
+    
     save2json(train_label, fullfile(s.root, 'training', 'info.json'));
+    save2json(train_log, fullfile(s.root, 'training', 'log.json'));
+    
     save2json(test_label, fullfile(s.root, 'testing', 'info.json'));
+    save2json(test_log, fullfile(s.root, 'testing', 'log.json'));
+    
     
     train_frames = generate_feature(s, train_label, 'training');
     test_frames = generate_feature(s, test_label, 'testing');
     
-    [mu_bm_train, mu_spec_train, std_bm_train, std_spec_train] = statistics(s, train_frames, 'training');
-    [mu_bm_test, mu_spec_test, std_bm_test, std_spec_test] = statistics(s, test_frames, 'testing');
+    [mu_bm_train, mu_spec_train, std_bm_train, std_spec_train] = statistics(s, train_label, train_frames, 'training');
+    [mu_bm_test, mu_spec_test, std_bm_test, std_spec_test] = statistics(s, test_label, test_frames, 'testing');
     
-    tensor(s, mu_spec_train, std_spec_train, 'training');
-    tensor(s, mu_spec_train, std_spec_train, 'testing');
+    tensor(s, train_label, mu_spec_train, std_spec_train, 'training');
+    tensor(s, test_label, mu_spec_train, std_spec_train, 'testing');
+    
+    save(fullfile(s.root, 'training', 'statistics.mat'), 'mu_spec_train', 'std_spec_train');
 end
 
 

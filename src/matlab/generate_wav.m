@@ -1,13 +1,14 @@
-function mix_info = generate_wav(s, layout, flag)
+function [mix_info, mix_log] = generate_wav(s, layout, flag)
 
 if strcmp(flag, 'training')
-    n_mix = s.training_examples;
+    mix_seconds = s.training_seconds;
 elseif strcmp(flag, 'testing')
-    n_mix = s.testing_examples;
+    mix_seconds = s.testing_seconds;
 else
     error('flag = <training/testing>');
 end
-n_mix_count = 1;
+mix_sps = round(mix_seconds * s.sample_rate);
+mix_count = 1;
 
 
 % prepare the folder structure
@@ -26,19 +27,28 @@ delete(fullfile(path_tt_wav, '*.wav'));
 
 
 % split the layout as training/testing
+% update: we must split in total time instead of by the ratio of instances.
+
 n_speech = length(layout.speech.path);
-n_speech_train = round(n_speech * s.split_ratio_for_training);
+%n_speech_train = round(n_speech * s.split_ratio_for_training);
+[split_ratio_for_training, n_speech_train] = timesplit(layout.speech.length, s.split_ratio_for_training);
+mix_log.speech.split_ratio_for_training = split_ratio_for_training;
+mix_log.speech.n_speech_train = n_speech_train;
 
 
 % iterate through each noise group
-
 for i = 1:length(layout.noise)
     
     n_noise = length(layout.noise(i).path);
-    n_noise_train = round(n_noise * s.split_ratio_for_training);
-    n_mix_per_group = round(s.noisegroup(i).percent * 0.01 * n_mix);
+    %n_noise_train = round(n_noise * s.split_ratio_for_training);
+    [split_ratio_for_training, n_noise_train] = timesplit(layout.noise(i).length, s.split_ratio_for_training);
+    mix_log.noise(i).split_ratio_for_training = split_ratio_for_training;
+    mix_log.noise(i).n_noise_train = n_noise_train;
     
-    for j = 1:n_mix_per_group
+    mix_sps_per_group = round(s.noisegroup(i).percent * 0.01 * mix_sps);
+    mix_log.noise(i).mix_sps_setting = mix_sps_per_group;
+    j = 0;
+    while j < mix_sps_per_group
         
         spl_db = randselect(s.speech_level_db);
         snr = randselect(s.snr);
@@ -103,12 +113,12 @@ for i = 1:length(layout.noise)
         % speech-noise time ratio control
         noise_id = path2id(noise_path, s.noise);
         speech_id = path2id(speech_path, s.speech);
-        path_out = fullfile(path_tt_wav, [num2str(n_mix_count) '+' noise_id '+' speech_id '+' num2str(spl_db) '+' num2str(snr) '.wav']);
+        path_out = fullfile(path_tt_wav, [num2str(mix_count) '+' noise_id '+' speech_id '+' num2str(spl_db) '+' num2str(snr) '.wav']);
         
-        mix_info(n_mix_count).path = path_out;
-        mix_info(n_mix_count).gain = gains;
-        mix_info(n_mix_count).src.speech = speech_path;
-        mix_info(n_mix_count).src.noise = noise_path;
+        mix_info(mix_count).path = path_out;
+        mix_info(mix_count).gain = gains;
+        mix_info(mix_count).src.speech = speech_path;
+        mix_info(mix_count).src.noise = noise_path;
         
         eta = speech_length / noise_length;
        
@@ -120,7 +130,8 @@ for i = 1:length(layout.noise)
             insert_1 = insert_0 + speech_length - 1;
             u_extended(insert_0:insert_1) = u_extended(insert_0:insert_1) + x;
             audiowrite(path_out, u_extended, s.sample_rate, 'BitsPerSample', 32);
-            mix_info(n_mix_count).label = [insert_0 insert_1];
+            mix_info(mix_count).label = [insert_0 insert_1];
+            j = j + length(u_extended);
             
         elseif eta < s.speech_noise_time_ratio
             % case when speech is too short for the noise, extend the
@@ -162,7 +173,8 @@ for i = 1:length(layout.noise)
                 end
             end
             audiowrite(path_out, u, s.sample_rate, 'BitsPerSample', 32);
-            mix_info(n_mix_count).label = labels;
+            mix_info(mix_count).label = labels;
+            j = j + length(u);
             
         else
             % if eta hit the value precisely...
@@ -170,13 +182,32 @@ for i = 1:length(layout.noise)
             insert_1 = insert_0 + speech_length - 1;
             u(insert_0:insert_1) = u(insert_0:insert_1) + x;
             audiowrite(path_out, u, s.sample_rate, 'BitsPerSample', 32);
-            mix_info(n_mix_count).label = [insert_0 insert_1];
+            mix_info(mix_count).label = [insert_0 insert_1];
+            j = j + length(u);
         end
-        n_mix_count = n_mix_count + 1;
+        mix_count = mix_count + 1;
     end
+    mix_log.noise(i).mix_sps_get = j;
 end
 
 end
+
+
+
+
+
+
+
+function [y,offset] = timesplit(x, ratio)
+% x: positive integer array, for example [2 3 5 7 9]
+% ratio: point that splits the total amount
+% this function tries to find such best split point.
+    assert(ratio > 0.0 && ratio < 1.0);
+    xs = cumsum(x);
+    [temp, offset] = min(abs(xs / xs(end) - ratio));
+    y = xs(offset)/xs(end);
+end
+
 
 
 

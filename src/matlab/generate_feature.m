@@ -3,16 +3,7 @@ function n_frames = generate_feature(s, label, flag)
     % train_info: labeling info of the training dataset
     % test_info: labeling info of the testing dataset
     
-    if strcmp(flag, 'training')
-        n = s.training_examples;
-    elseif strcmp(flag, 'testing')
-        n = s.testing_examples;
-    else
-        error('flag = <training/testing>');
-    end
-    assert(length(label) == n);
-    
-
+    n = length(label);
     path_spectrum = fullfile(s.root, flag, 'spectrum');
     if ~exist(path_spectrum, 'dir')
         mkdir(path_spectrum);
@@ -70,7 +61,7 @@ function n_frames = generate_feature(s, label, flag)
         % ideal_noise = (1-bm) .* h_mix; % don't care
         scale = 2;
         speech_best_recovered = stft2(ideal_reconstruct, nfft, hop, 0, win) * scale;
-        audiowrite(fullfile(path_ideal,['s_' num2str(i) '.wav']), speech_best_recovered, s.sample_rate, 'BitsPerSample', 32);
+        audiowrite(fullfile(path_ideal,['i_' num2str(i) '.wav']), speech_best_recovered, s.sample_rate, 'BitsPerSample', 32);
         n_frames = n_frames + size(bm,2);
     end
 end

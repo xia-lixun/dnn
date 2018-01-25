@@ -1,12 +1,6 @@
-function tensor(s, mu, std, flag)
-    
-    if strcmp(flag, 'training')
-        n = s.training_examples;
-    elseif strcmp(flag, 'testing')
-        n = s.testing_examples;
-    else
-        error('flag = <training/testing>');
-    end
+function tensor(s, label, mu, std, flag)
+
+    n = length(label);
     path_spectrum = fullfile(s.root, flag, 'spectrum');
     
     % prepare tensor folder
@@ -20,6 +14,8 @@ function tensor(s, mu, std, flag)
     for i = 1:n
         load(fullfile(path_spectrum,['s_' num2str(i) '.mat']), 'bm', 'spec');
         spec = sliding((spec - mu)./std, (s.feature.context_span-1)/2, s.feature.nat_frames);
+        bm = bm.';
+        spec = spec.';
         save(fullfile(path_tensor,['t_' num2str(i) '.mat']), 'bm', 'spec');
     end
     

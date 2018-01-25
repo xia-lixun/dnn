@@ -1,12 +1,6 @@
-function [mu_bm, mu_spec, std_bm, std_spec] = statistics(s, n_frames, flag)
+function [mu_bm, mu_spec, std_bm, std_spec] = statistics(s, label, n_frames, flag)
 
-    if strcmp(flag, 'training')
-        n = s.training_examples;
-    elseif strcmp(flag, 'testing')
-        n = s.testing_examples;
-    else
-        error('flag = <training/testing>');
-    end
+    n = length(label);
     path_spectrum = fullfile(s.root, flag, 'spectrum');
     
     % find out mu of bm and spec
