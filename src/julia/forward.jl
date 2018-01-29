@@ -3,11 +3,11 @@ module FORWARD
 # decomposition/reconstrauction of the data under validation and test
 
 
-
 import MAT
 import HDF5
 import JSON
 import WAV
+
 
 include("ui.jl")
 include("feature.jl")
@@ -15,55 +15,53 @@ include("stft2.jl")
 
 
 
-# tensorflow nn parameters initialized from the mat file generated
-struct TF{T <: AbstractFloat}
+# fully connected neural net
+struct NeuralNet_FullyConnected{T <: AbstractFloat}
 
-    w::Array{Array{T,2},1}  # weights, w[1] is not used
-    b::Array{Array{T,1},1}  # biases, b[1] is not used
-    L::Int64  # layers
-    width_i::Int64
-    width_h::Int64
-    width_o::Int64
+    layers::Int64
+    weight::Array{Array{T,2},1}
+    bias::Array{Array{T,2},1}
+    width_input::Int64
+    width_hidden::Int64
+    width_output::Int64
 
-    function TF{T}(model::String) where T <: AbstractFloat
-        L = 4
-        net = MAT.matread(model)
-        w = Array{Array{T,2},1}(L)
-        b = Array{Array{T,1},1}(L)
+    mu::Array{T,2}
+    stdev::Array{T,2}
 
-        for i = 1:L
-            w[i] = transpose(net["W$i"])
-            b[i] = vec(net["b$i"])
+    function NeuralNet_FullyConnected{T}(model_path::String) where T <: AbstractFloat
+
+        nn = MAT.matread(model)
+        layers = div(length(nn)-2,2)
+        w = Array{Array{T,2},1}(layers)
+        b = Array{Array{T,2},1}(layers)
+
+        for i = 1:layers
+            w[i] = transpose(nn["W$i"])
+            b[i] = transpose(nn["b$i"])
         end
 
-        wdi = size(w[1], 2)
-        wdh = size(w[1], 1)
-        wdo = size(w[end], 1)
+        width_i = size(w[1], 2)
+        width_h = size(w[1], 1)
+        width_o = size(w[end], 1)
 
-        new(w, b, L, wdi, wdh, wdo)
+        spec_mu = T.(nn["mu"])
+        spec_stdev = T.(nn["stdev"])
+
+        new(layers, w, b, width_i, width_h, width_o, spec_mu, spec_stdev)
     end 
 end
 
 
 
 # Propagate the input data matrix through neural net
-# 1. x is column major, i.e. each column is an input vector to the net 
-function feedforward(nn::TF{T}, x::AbstractArray{T,2}) where T <: AbstractFloat
+# x is column major, i.e. each column is an input vector 
+function feed_forward(nn::NeuralNet_FullyConnected{T}, x::AbstractArray{T,2}) where T <: AbstractFloat
     
-    # nn = TF{Float32}(model)
-    # assert(nn.width_i == size(x,1))
-    n = size(x,2)
-    y = zeros(T, nn.width_o, n)
-    a = zeros(T, nn.width_h)
-
-    for i = 1:n
-        a .= FEATURE.sigmoid.(nn.w[1] * view(x,:,i) .+ nn.b[1])
-        for j = 2 : nn.L-1
-            a .= FEATURE.sigmoid.(nn.w[j] * a .+ nn.b[j])
-        end
-        y[:,i] .= FEATURE.sigmoid.(nn.w[nn.L] * a .+ nn.b[nn.L])
+    a = FEATURE.sigmoid.(nn.weight[1] * x .+ nn.bias[1])
+    for i = 2 : nn.layers-1
+        a .= FEATURE.sigmoid.(nn.weight[i] * a .+ nn.bias[i])
     end
-    y
+    y = FEATURE.sigmoid.(nn.weight[nn.layers] * a .+ nn.bias[nn.layers])
 end
 
 
@@ -71,94 +69,23 @@ end
 
 
 # stft2() -> bm_inference() -> bm
-function bm_inference(nn::TF{T}, 
-                      𝕏::AbstractArray{Complex{T},2}, 
-                      r::Int64, 
-                      t::Int64,
-                      μ::AbstractArray{T,1}, σ::AbstractArray{T,1}) where T <: AbstractFloat
-    x = abs.(𝕏)
-    x .= (x .- μ) ./ σ
-    y = FEATURE.sliding(x, r, t)
-    bm = feedforward(nn, y)
-    bm
+function ratiomask_inference(nn::NeuralNet_FullyConnected{T}, 
+                            𝕏::AbstractArray{Complex{T},2}, 
+                            radius::Int64, 
+                            nat::Int64, 
+                            μ::AbstractArray{T,1}, 
+                            σ::AbstractArray{T,1}) where T <: AbstractFloat
+    
+    y = FEATURE.sliding((abs.(𝕏) .- μ) ./ σ, radius, nat)
+    bm = feed_forward(nn, y)
 end
+
 
 # do VOLA processing of a wav file
 # if nn model is provided, bm_inference() will be used for bm estimate
 # if no nn model is provided, it searches the training and test spectrum.h5 to see if wav
 # is located in: yes -> reference bm is used for voice reconstruction;
 #                no  -> reconstruct the mix back so a passing-through is achieved.
-function vola_processing(specification::String, wav::String; model::String = "")
-    
-        s = JSON.parsefile(specification)
-        fs = s["sample_rate"]
-        root = s["root"]
-        nfft = s["feature"]["frame_length"]
-        nhp = s["feature"]["hop_length"]
-        nat = s["feature"]["nat_frames"]
-        ntxt = s["feature"]["frame_context"]
-
-        assert(isodd(ntxt))
-        r = div(ntxt-1,2)
-        
-        # get global mu and std
-        stat = joinpath(root, "training", "stat.h5")
-        μ = Float32.(HDF5.h5read(stat, "mu"))
-        σ = Float32.(HDF5.h5read(stat, "std"))
-    
-        # get input data
-        x, fs1 = WAV.wavread(wav)
-        assert(typeof(fs)(fs1) == fs)
-        x = Float32.(x)        
-        𝕏, h = STFT2.stft2(view(x,:,1), nfft, nhp, STFT2.sqrthann)
-
-        
-        function bm_reference()
-            # load the train/test spectrum+bm dataset
-            tid = HDF5.h5open(joinpath(root,"training","spectrum.h5"),"r")
-            vid = HDF5.h5open(joinpath(root,"test","spectrum.h5"),"r")
-            
-            tbi = contains.(names(tid),basename(wav))
-            vbi = contains.(names(vid),basename(wav))
-            sumt = sum(tbi)
-            sumv = sum(vbi)
-            if sumt + sumv == 1
-                info("found in training/test wav files, use optimal bm")
-                hit = sumt > sumv ? names(tid)[tbi][1] : names(vid)[vbi][1]
-                bm = sumt > sumv ?  read(tid[hit]["bm"]) : read(vid[hit]["bm"])
-                close(vid)
-                close(tid)
-                return Float32.(bm)
-                            
-            elseif sumt + sumv == 0
-                info("not found in training/test wav files...passing through")
-                return ones(Float32,size(𝕏))
-            else
-                error("multiple maps of training/test wav files")
-            end
-        end
-        
-        
-        # reconstruct
-        if isempty(model)
-            bmr = bm_reference()
-            𝕏 .*= bmr
-        else
-            bmi = bm_inference(TF{Float32}(model), 𝕏, r, nat, μ, σ)
-            bmr = bm_reference()
-            𝕏 .*= bmi
-            bmr .= abs.(bmi.-bmr)
-        end
-        
-        y = STFT2.stft2(𝕏, h, nfft, nhp, STFT2.sqrthann)*2
-        WAV.wavwrite(y, wav[1:end-4]*"-processed.wav", Fs=fs)
-        
-        return bmr
-end
-
-
-
-
 function vola_processing(nfft::Int64, nhp::Int64, nat::Int64, ntxt::Int64, μ::Array{Float32,1}, σ::Array{Float32,1}, tid, vid, wav::String, nn::TF{Float32})
     
         r = div(ntxt-1,2)
