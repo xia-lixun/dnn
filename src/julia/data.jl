@@ -105,6 +105,7 @@ function resample(path_i::String, path_o::String, target_fs; source_type=".wav")
                 
         x, fs = WAV.wavread(p)
         assert(fs == typeof(fs)(target_fs))
+        WAV.wavwrite(mean(x,2), p, Fs=fs, nbits=32)
         u[i] = size(x, 1)
         info("$i/$n complete")
     end

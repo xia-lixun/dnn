@@ -68,84 +68,54 @@ end
 
 
 
-# stft2() -> bm_inference() -> bm
-function ratiomask_inference(nn::NeuralNet_FullyConnected{T}, 
-                            𝕏::AbstractArray{Complex{T},2}, 
-                            radius::Int64, 
-                            nat::Int64, 
-                            μ::AbstractArray{T,1}, 
-                            σ::AbstractArray{T,1}) where T <: AbstractFloat
+# ratiomask inference for complex spectrum input
+function ratiomask_inference(
+    nn::NeuralNet_FullyConnected{T}, 
+    𝕏::AbstractArray{Complex{T},2}, 
+    radius::Int64, 
+    nat::Int64) where T <: AbstractFloat
     
-    y = FEATURE.sliding((abs.(𝕏) .- μ) ./ σ, radius, nat)
+    μ = nn.mu
+    σ = nn.stdev
+    y = FEATURE.sliding((abs.(𝕏).-μ)./σ, radius, nat)
     bm = feed_forward(nn, y)
 end
 
 
-# do VOLA processing of a wav file
-# if nn model is provided, bm_inference() will be used for bm estimate
-# if no nn model is provided, it searches the training and test spectrum.h5 to see if wav
-# is located in: yes -> reference bm is used for voice reconstruction;
-#                no  -> reconstruct the mix back so a passing-through is achieved.
-function vola_processing(nfft::Int64, nhp::Int64, nat::Int64, ntxt::Int64, μ::Array{Float32,1}, σ::Array{Float32,1}, tid, vid, wav::String, nn::TF{Float32})
-    
-        r = div(ntxt-1,2)
-        x, sr = WAV.wavread(wav)
-        x = Float32.(x)        
-        𝕏, h = STFT2.stft2(view(x,:,1), nfft, nhp, STFT2.sqrthann)
-
-        function bm_reference()
-            
-            tbi = contains.(names(tid),basename(wav))
-            vbi = contains.(names(vid),basename(wav))
-            sumt = sum(tbi)
-            sumv = sum(vbi)
-            if sumt + sumv == 1
-                hit = sumt > sumv ? names(tid)[tbi][1] : names(vid)[vbi][1]
-                bm = sumt > sumv ?  read(tid[hit]["bm"]) : read(vid[hit]["bm"])
-                return Float32.(bm)
-                            
-            elseif sumt + sumv == 0
-                info("not found in training/test wav files...passing through")
-                return ones(Float32,size(𝕏))
-            else
-                error("multiple maps of training/test wav files")
-            end
-        end
-        
-        # guestimate the bm mask and log the error
-        bmi = bm_inference(nn, 𝕏, r, nat, μ, σ)
-        bmr = bm_reference()
-        𝕏 .*= bmi
-        bmr .= abs.(bmi.-bmr)
-
-        # reconstruct
-        y = STFT2.stft2(𝕏, h, nfft, nhp, STFT2.sqrthann)*2
-        WAV.wavwrite(y, wav[1:end-4]*"-processed.wav", Fs=sr)
-        
-        return bmr
-end
-
-
-
-
-
-
-function bm_inference(
-    nn::TF{Float32},
+# ratiomask inference for time series input
+function ratiomask_inference(
+    nn::NeuralNet_FullyConnected{Float32},
     x::AbstractArray{Float32,1},
     nfft::Int64, 
-    nhp::Int64,
-    ntxt::Int64, 
-    nat::Int64,
-    μ::Array{Float32,1}, 
-    σ::Array{Float32,1}
+    nhop::Int64,
+    radius::Int64, 
+    nat::Int64
     )
     
-    r = div(ntxt-1,2)
-    𝕏, h = STFT2.stft2(x, nfft, nhp, STFT2.sqrthann)
-    bm = bm_inference(nn, 𝕏, r, nat, μ, σ)
-        
-    return bm
+    𝕏,h = STFT2.stft2(x, nfft, nhop, STFT2.sqrthann)
+    bm = ratiomask_inference(nn, 𝕏, radius, nat)
+end
+
+
+# do VOLA processing of a wav file
+function reconstruct(
+    nn::NeuralNet_FullyConnected{Float32},
+    wav::String,
+    nfft::Int64, 
+    nhop::Int64,
+    radius::Int64, 
+    nat::Int64)
+    
+    x,sr = WAV.wavread(wav)
+    x = Float32.(x) 
+
+    𝕏,h = STFT2.stft2(view(x,:,1), nfft, nhop, STFT2.sqrthann)
+    ratiomask_estimate = ratiomask_inference(nn, 𝕏, radius, nat)
+    𝕏 .*= ratiomask_estimate
+    y = STFT2.stft2(𝕏, h, nfft, nhop, STFT2.sqrthann)
+    
+    WAV.wavwrite(2y, wav[1:end-4]*"_processed.wav", Fs=sr)        
+    return ratiomask_estimate
 end
 
 
@@ -158,6 +128,12 @@ end
 
 
 
+
+
+
+
+
+####################################################################################################
 # do magnitude processing through the net
 # 1. input is un-normalized col-major magnitude spectrum
 # 2. output is un-normalized col-major noise-reduced magnitude spectrum

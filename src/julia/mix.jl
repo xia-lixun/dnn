@@ -4,9 +4,10 @@ module MIX
 # 2017-10-16
 
 
+import MAT
 import WAV
 import JSON
-import HDF5
+
 
 include("feature.jl")
 include("forward.jl")
@@ -14,6 +15,62 @@ include("ui.jl")
 include("data.jl")
 include("stft2.jl")
 
+
+
+struct Specification
+
+    root_mix::String
+    root_speech::String
+    root_noise::String
+    sample_rate::Int64
+    dbspl::Array{Float64,1}
+    snr::Array{Float64,1}
+    time_ratio::Float64
+    split_ratio::Float64
+    train_seconds::Float64
+    test_seconds::Float64
+    seed::Int64
+    feature::Dict{String,Int64}
+    noise_groups::Array{Dict{String,Any},1}
+
+    function Specification(path_json)
+        s = JSON.parsefile(path_json)
+        sum_percent = 0.0
+        for i in s["noise_groups"]
+            sum_percent += i["percent"]
+        end
+        assert(99.9 < sum_percent < 100.1)
+        new(
+            s["root_mix"],s["root_speech"],s["root_noise"],s["sample_rate"],s["speech_level_db"],s["snr"],
+            s["speech_noise_time_ratio"],s["train_test_split_ratio"],s["train_seconds"],s["test_seconds"],
+            s["random_seed"],s["feature"],s["noise_groups"]
+            )
+    end
+end
+
+
+struct Layout
+    noise_levels
+    noise_keys
+    noise_split
+
+    speech_levels
+    speech_keys
+    speech_ratio  # actual split ratio
+    speech_point  # train-test split point
+
+    function Layout(s::Specification)
+        noise_levels = Dict(x["name"] => JSON.parsefile(joinpath(s.root_noise, x["name"], "level.json")) for x in s.noise_groups)
+        noise_keys = Dict(x => shuffle([y for y in keys(noise_levels[x]["DATA"])]) for x in keys(noise_levels))
+        noise_split = Dict(x => timesplit([noise_levels[x]["DATA"][y]["samples"] for y in noise_keys[x]], s.split_ratio) for x in keys(noise_keys))
+
+        speech_levels = JSON.parsefile(joinpath(s.root_speech,"level.json"))
+        speech_keys = shuffle([y for y in keys(speech_levels["DATA"])])
+        speech_ratio, speech_point = timesplit([speech_levels["DATA"][x]["samples"] for x in speech_keys], s.split_ratio)
+
+        new(noise_levels, noise_keys, noise_split, speech_levels, speech_keys, speech_ratio, speech_point)
+    end
+end
 
 
 
@@ -25,32 +82,30 @@ function generate_specification()
 
     x = Array{Dict{String,Any},1}()
     a = Dict( 
-        "root" => "D:\\5-Workspace\\Mix",
-        "voice_depot" => "D:\\5-Workspace\\Voice\\",
-        "noise_depot" => "D:\\5-Workspace\\GoogleAudioSet",
+        "root_mix" => "D:\\5-Workspace\\Mix",
+        "root_speech" => "D:\\5-Workspace\\Voice\\",
+        "root_noise" => "D:\\5-Workspace\\GoogleAudioSet",
         "sample_rate" => 16000,
-        "voice_level" => [-22.0, -32.0, -42.0],
+        "speech_level_db" => [-22.0, -32.0, -42.0],
         "snr" => [20.0, 15.0, 10.0, 5.0, 0.0, -5.0],
-        "voice_noise_time_ratio" => 0.1,
-        "split_ratio_for_training" => 0.7,
-        "training_samples" => 10,
-        "test_samples" => 10,
-        "seed" => 42,
+        "speech_noise_time_ratio" => 0.1,
+        "train_test_split_ratio" => 0.7,
+        "train_seconds" => 1000,
+        "test_seconds" => 1000,
+        "random_seed" => 42,
         "feature" => Dict("frame_length"=>512, "hop_length"=>128, "frame_context"=>11, "nat_frames"=>7),
-        "tensor_partition_size(MB)" => 1024,
-        "noise_categories" => x
+        "noise_groups" => x
         )
     for i in DATA.list(a["noise_depot"])
         push!(x, Dict("name"=>i,"type"=>"stationary|nonstationary|impulsive","percent"=>0.0))
     end
 
-    #rm(a["mixoutput"], force=true, recursive=true)
     !isdir(a["root"]) && mkpath(a["root"])
     open(joinpath(a["root"],"specification-$(replace(replace("$(now())",":","-"),".","-")).json"),"w") do f
         write(f, JSON.json(a))
     end
 
-    # generate random checksum for level infomation update
+    # generate initial checksum to trigger level update
     for i in a["noise_categories"]
         p = joinpath(a["noise_depot"],i["name"])
         DATA.touch_checksum(p)
@@ -62,15 +117,6 @@ end
 
 
 
-
-
-# calculate index for noise samples:
-# peak level: (a) as level of impulsive sounds (b) avoid level clipping in mixing
-# rms level: level of stationary sounds
-# median level: level of non-stationary sounds
-#
-# note: wav read errors will be skipped but warning pops up
-#       corresponding features remain zero
 function build_level_index(path, rate)
 
     a = DATA.list(path, t=".wav")
@@ -153,21 +199,27 @@ function wavread_safe(path)
     try
         x,fs = WAV.wavread(path)
     catch
-        #todo: test if my wav class could handle the corner cases of WAV.jl
-        #todo: wrap my wav class with c routines to wav.dll, then wrap with julia
         error("missing $path")
     end
 end
 
-function cyclic_extend!(xce::AbstractArray, x::AbstractArray)
-    n = length(xce)
+function cyclic_extend(x::AbstractArray, n::Int64)
+    x_extend = zeros(eltype(x), n)
     for (i,v) in enumerate(Iterators.cycle(x))
-        xce[i] = v
+        x_extend[i] = v
+        i == n && break
+    end
+    x_extend
+end
+
+function cyclic_extend!(x::AbstractArray, x_extend::AbstractArray)
+    n = length(x_extend)
+    for (i,v) in enumerate(Iterators.cycle(x))
+        x_extend[i] = v
         i == n && break
     end
     nothing
 end
-
 
 function borders(partition)
     fin = cumsum(partition)
@@ -177,259 +229,206 @@ end
 
 
 
+function timesplit(x, ratio)
+    xs = cumsum(x)
+    minval, offset = findmin(abs.(xs / xs[end] - ratio))
+    y = xs[offset]/xs[end]
+    (y, offset)
+end
 
 
 
-function wavgen(s, nle, nsp, vle, vsp; flag="training")
+function wavgen(s::Specification, data::Layout; flag="train")
 
-    n_train::Int64 = s["training_samples"]
-    n_test::Int64 = s["test_samples"]
-    snr::Array{Float64,1} = s["snr"]                  # [-5.0, 0.0, 5.0, 10.0, 15.0, 20.0]
-    spl::Array{Float64,1} = s["voice_level"]          # [-22.0, -32.0, -42.0]
-    vntr::Float64 = s["voice_noise_time_ratio"]       # 0.1
-    split::Float64 = s["split_ratio_for_training"]    # 0.7
-    fs::Int64 = s["sample_rate"]
-    root::String = s["root"]
-    voice::String = s["voice_depot"]
-    noise::String = s["noise_depot"]
-    noisecat::Array{Dict{String,Any},1} = s["noise_categories"]
-
-    label = Dict{String, Array{Tuple{Int64, Int64},1}}()
     gain = Dict{String, Array{Float64,1}}()
+    label = Dict{String, Array{Tuple{Int64, Int64},1}}()
     source = Dict{String, Tuple{String, String}}()
 
-    mixwav = joinpath(root, flag, "wav")
-    mkpath(mixwav)
-
-    n = (flag=="training")? n_train:n_test
+    root_mix_flag_wav = joinpath(s.root_mix, flag, "wav")
+    mkpath(root_mix_flag_wav)
+    time = (flag=="train")? s.train_seconds : s.test_seconds
     n_count = 1
 
-    q = length(vsp)
-    p = Int64(round(split * q))
-    vsp_train = view(vsp, 1:p)
-    vsp_test = view(vsp, p+1:q)
+    for cat in s.noise_groups
 
+        group_samples = Int64(round(0.01cat["percent"] * time * s.sample_rate))
+        name = cat["name"]
+        group_samples_count = 0
 
-    for cat in noisecat
+        while group_samples_count < group_samples
 
-        i_n = Int64(round(cat["percent"] * 0.01 * n))
-        cname = cat["name"]
-        q = length(nsp[cname])
-        p = Int64(round(split * q))
-        nsp_train = view(nsp[cname], 1:p)
-        nsp_test = view(nsp[cname], p+1:q)
-
-        for j = 1:i_n
-
-                # prepare randomness
-                voice_spl_tt::Float64 = rand(spl)
-                snr_tt::Float64 = rand(snr)
-                rn_voice = (flag=="training")? rand(vsp_train) : rand(vsp_test)
-                rn_noise = (flag=="training")? rand(nsp_train) : rand(nsp_test)
-
-                # addressing parameters based on generated randomness
-                voice_wav::String = joinpath(voice, rn_voice)
-                voice_lpk::Float64 = vle["DATA"][rn_voice]["peak"]
-                voice_spl::Float64 = vle["DATA"][rn_voice]["dBrms"]
-                voice_len::Int64 = vle["DATA"][rn_voice]["samples"]
-
-                block = nle[cname]
-                noise_wav::String = joinpath(noise, cname, rn_noise)
-                noise_lpk::Float64 = block["DATA"][rn_noise]["peak"]
-                noise_rms::Float64 = block["DATA"][rn_noise]["rms"]
-                noise_med::Float64 = block["DATA"][rn_noise]["median"]
-                noise_len::Int64 = block["DATA"][rn_noise]["samples"]
-
-                # record the gains applied to speech and noise
-                gain_ = zeros(2)
-
-                # level the random speech to target
-                x1,fs1 = wavread_safe(voice_wav)
-                assert(typeof(fs)(fs1) == fs)
-                x = view(x1,:,1)
-
-                g = 10^((voice_spl_tt-voice_spl)/20)
-                if g * voice_lpk > 0.999
-                    g = 0.999 / voice_lpk
-                    voice_spl_tt = voice_spl + 20log10(g+eps())
-                    info("voice avoid clipping $(voice_wav):$(voice_spl)->$(voice_spl_tt) dB")
-                end
-                x .= g .* x
-                gain_[1] = g
-
-
-                # get the random noise
-                x2,fs2 = wavread_safe(noise_wav)
-                assert(typeof(fs)(fs2) == fs)
-                u = view(x2,:,1)
-
-                # random snr -> calculate noise level based on speech level and snr
-                t = 10^((voice_spl_tt-snr_tt)/20)
-                noisetype = cat["type"]
-                if noisetype == "impulsive"
-                    g = t / noise_lpk
-                elseif noisetype == "stationary"
-                    g = t / noise_rms
-                elseif noisetype == "nonstationary"
-                    g = t / noise_med
-                else
-                    error("wrong type in $(i["name"])")
-                end
-                if g * noise_lpk > 0.999
-                     g = 0.999 / noise_lpk
-                     info("noise avoid clipping $(noise_wav)")
-                end
-                u .= g .* u
-                gain_[2] = g
-
-
-                # voice-noise time ratio control
-                noise_id = replace(relpath(noise_wav,noise), ['/', '\\'], "+")[1:end-4]
-                voice_id = replace(relpath(voice_wav,voice), ['/', '\\'], "+")[1:end-4]
-
-                pathout = joinpath(mixwav,"$(n_count)+$(noise_id)+$(voice_id)+$(voice_spl_tt)+$(snr_tt).wav")
-                gain[pathout] = gain_
-                source[pathout] = (voice_wav, noise_wav)
-                η = voice_len/noise_len
-
-                if η > vntr
-                    # case when voice is too long for the noise, extend the noise in cyclic
-                    noise_len_extend = Int64(round(voice_len / vntr))
-                    u_extend = zeros(noise_len_extend)
-                    cyclic_extend!(u_extend, u)
-
-                    r = rand(1:noise_len_extend-voice_len)
-                    u_extend[r:r+voice_len-1] += x
-                    WAV.wavwrite(u_extend, pathout, Fs=fs)
-                    label[pathout] = [(r, r+voice_len-1)]
-
-                elseif η < vntr
-                    # case when voice is too short for the noise, extend the voice,
-                    # here we don't do cyclic extension with voice,
-                    # instead we scatter multiple copies of voice among entire nosie
-                    voice_len_tt = Int64(round(noise_len * vntr))
-                    λ = voice_len_tt / voice_len   # 3.3|3.0
-                    λr = floor(λ)                  # 3.0|3.0
-                    λ1 = λr - 1.0                  # 2.0|2.0
-                    λ2 = λ - λr + 1.0              # 1.3|1.0
-
-                    voice_len_extend = Int64(round(voice_len * λ2))
-                    x_extend = zeros(voice_len_extend)
-                    cyclic_extend!(x_extend, x)
-                    # obs! length(x_extended) >= voice_len
-
-                    ζ = Int64(round(noise_len / λ))
-                    partition = zeros(Int64, Int64(λ1)+1)
-                    for i = 1:Int64(λ1)
-                        partition[i] = ζ
-                    end
-                    partition[end] = noise_len - Int64(λ1) * ζ
-                    assert(partition[end] >= ζ)
-                    shuffle!(partition)
-                    (beg,fin) = borders(partition)
-
-                    labelmark = Array{Tuple{Int64, Int64},1}()
-                    for (i,v) in enumerate(partition)
-                        if v > ζ
-                            r = rand(beg[i] : fin[i]-voice_len_extend)
-                            u[r:r+voice_len_extend-1] += x_extend
-                            push!(labelmark,(r,r+voice_len_extend-1))
-                        else
-                            r = rand(beg[i] : fin[i]-voice_len)
-                            u[r:r+voice_len-1] += x
-                            push!(labelmark,(r,r+voice_len-1))
-                        end
-                    end
-
-                    WAV.wavwrite(u, pathout, Fs=fs)
-                    label[pathout] = labelmark
-
-                else
-                    # this is a rare case as usually you don't encounter precise floating point value equals eta
-                    # if so probably something's wrong
-                    r = rand(1:noise_len-voice_len)
-                    u[r:r+voice_len-1] += x
-                    WAV.wavwrite(u, pathout, Fs=fs)
-                    label[pathout] = [(r, r+voice_len-1)]
-                end
-                n_count += 1
+            voice_spl_tt::Float64 = rand(s.dbspl)
+            snr_tt::Float64 = rand(s.snr)
+            if flag=="train" 
+                rn_voice_key = rand(view(data.speech_keys,1:data.speech_point))
+            else 
+                rn_voice_key = rand(view(data.speech_keys,data.speech_point+1:length(data.speech_keys)))
             end
-            info("[+ $(cname) processed +]")
-        end
+            if flag=="train" 
+                rn_noise_key = rand(view(data.noise_keys[name],1:data.noise_split[name][2]))
+            else
+                rn_noise_key = rand(view(data.noise_keys[name],data.noise_split[name][2]+1:length(data.noise_keys[name])))
+            end
+            
+            voice_wav::String = realpath(joinpath(s.root_speech, rn_voice_key))
+            voice_lpk::Float64 = data.speech_levels["DATA"][rn_voice_key]["peak"]
+            voice_spl::Float64 = data.speech_levels["DATA"][rn_voice_key]["dBrms"]
+            voice_len::Int64 = data.speech_levels["DATA"][rn_voice_key]["samples"]
 
-        label_path = joinpath(root,flag,"label.json")
-        gain_path = joinpath(root,flag,"gain.json")
-        source_path = joinpath(root,flag,"source.json")
-        open(label_path,"w") do f
-            write(f, JSON.json(label))
+            block = data.noise_levels[name]
+            noise_wav::String = realpath(joinpath(s.root_noise, name, rn_noise_key))
+            noise_lpk::Float64 = block["DATA"][rn_noise_key]["peak"]
+            noise_rms::Float64 = block["DATA"][rn_noise_key]["rms"]
+            noise_med::Float64 = block["DATA"][rn_noise_key]["median"]
+            noise_len::Int64 = block["DATA"][rn_noise_key]["samples"]
+
+            # record the gains applied to speech and noise
+            gain_ = zeros(2)
+
+            # level speech to target
+            x1,sr = wavread_safe(voice_wav)
+            assert(typeof(s.sample_rate)(sr) == s.sample_rate)
+            x = view(x1,:,1)
+
+            g = 10^((voice_spl_tt-voice_spl)/20)
+            if g * voice_lpk > 0.999
+                g = 0.999 / voice_lpk
+                voice_spl_tt = voice_spl + 20log10(g+eps())
+                println("voice avoid clipping $(voice_wav): $(voice_spl)->$(voice_spl_tt) dB")
+            end
+            x .= g .* x
+            gain_[1] = g
+
+            # get the random noise
+            # random snr -> calculate noise level based on speech level and snr
+            x2,sr = wavread_safe(noise_wav)
+            assert(typeof(s.sample_rate)(sr) == s.sample_rate)
+            u = view(x2,:,1)
+
+            t = 10^((voice_spl_tt-snr_tt)/20)
+            noisetype = cat["type"]
+            if noisetype == "impulsive"
+                g = t / noise_lpk
+            elseif noisetype == "stationary"
+                g = t / noise_rms
+            elseif noisetype == "nonstationary"
+                g = t / noise_med
+            else
+                error("wrong type in $(i["name"])")
+            end
+            if g * noise_lpk > 0.999
+                g = 0.999 / noise_lpk
+                println("noise avoid clipping $(noise_wav)")
+            end
+            u .= g .* u
+            gain_[2] = g
+
+            # voice-noise time ratio control
+            noise_id = replace(relpath(noise_wav,s.root_noise), ['/', '\\'], "+")[1:end-4]
+            voice_id = replace(relpath(voice_wav,s.root_speech), ['/', '\\'], "+")[1:end-4]
+
+            pathout = joinpath(root_mix_flag_wav,"$(n_count)+$(noise_id)+$(voice_id)+$(voice_spl_tt)+$(snr_tt).wav")
+            gain[pathout] = gain_
+            source[pathout] = (voice_wav, noise_wav)
+            η = voice_len/noise_len
+
+            if η > s.time_ratio
+
+                noise_len_extend = Int64(round(voice_len / s.time_ratio))
+                u_extend = cyclic_extend(u, noise_len_extend)
+                r = rand(1:noise_len_extend-voice_len)
+                u_extend[r:r+voice_len-1] += x
+                WAV.wavwrite(u_extend, pathout, Fs=s.sample_rate)
+                label[pathout] = [(r, r+voice_len-1)]
+                group_samples_count += length(u_extend)
+
+            elseif η < s.time_ratio
+
+                voice_len_tt = Int64(round(noise_len * s.time_ratio))
+                λ = voice_len_tt / voice_len   # 3.3|3.0
+                λr = floor(λ)                  # 3.0|3.0
+                λ1 = λr - 1.0                  # 2.0|2.0
+                λ2 = λ - λr + 1.0              # 1.3|1.0
+
+                voice_len_extend = Int64(round(voice_len * λ2))
+                x_extend = cyclic_extend(x, voice_len_extend)      # obs! length(x_extended) >= voice_len
+
+                ζ = Int64(round(noise_len / λ))
+                partition = zeros(Int64, Int64(λ1)+1)
+                for i = 1:Int64(λ1)
+                    partition[i] = ζ
+                end
+                partition[end] = noise_len - Int64(λ1) * ζ
+                assert(partition[end] >= ζ)
+                shuffle!(partition)
+                (beg,fin) = borders(partition)
+
+                labelmark = Array{Tuple{Int64, Int64},1}()
+                for (i,v) in enumerate(partition)
+                    if v > ζ
+                        r = rand(beg[i] : fin[i]-voice_len_extend)
+                        u[r:r+voice_len_extend-1] += x_extend
+                        push!(labelmark,(r,r+voice_len_extend-1))
+                    else
+                        r = rand(beg[i] : fin[i]-voice_len)
+                        u[r:r+voice_len-1] += x
+                        push!(labelmark,(r,r+voice_len-1))
+                    end
+                end
+                WAV.wavwrite(u, pathout, Fs=s.sample_rate)
+                label[pathout] = labelmark
+                group_samples_count += length(u)
+
+            else
+                r = rand(1:noise_len-voice_len)
+                u[r:r+voice_len-1] += x
+                WAV.wavwrite(u, pathout, Fs=s.sample_rate)
+                label[pathout] = [(r, r+voice_len-1)]
+                group_samples_count += length(u)
+            end
+            n_count += 1
         end
-        open(gain_path,"w") do f
-            write(f, JSON.json(gain))
-        end
-        open(source_path,"w") do f
-            write(f, JSON.json(source))
-        end
-        info("label written to $(label_path)")
-        info("gain written to $(gain_path)")
-        info("source written to $(source_path)")
-        nothing
+        println("$(name) processed")
+    end
+
+    info = Dict(x => Dict("label"=>label[x], "gain"=>gain[x], "source"=>source[x]) for x in keys(label))
+    open(joinpath(s.root_mix, flag, "info.json"),"w") do f
+        write(f, JSON.json(info))
+    end
+    return info
 end
 
 
 
 
 # mix procedure implements the specification
-function mix(specifijson::String)
+function mix(s::Specification)
 
-    # read the specification for mixing task
-    s = JSON.parsefile(specifijson)
-    srand(s["seed"])
-
-    fs::Int64 = s["sample_rate"]
-    root::String = s["root"]
-    voice::String = s["voice_depot"]
-    noise::String = s["noise_depot"]
-    ncat::Array{Dict{String,Any},1} = s["noise_categories"]
-
-
-    # 1. remove existing wav file in the mix folder
-    for i in DATA.list(root, t=".wav")
+    srand(s.seed)
+    !isdir(s.root_noise) && error("noise depot doesn't exist")
+    !isdir(s.root_speech) && error("speech depot doesn't exist")    
+    for i in DATA.list(s.root_mix, t=".wav")
         rm(i, force=true)
     end
 
-
-    # 2. detect noise depot change and update level information
-    !isdir(noise) && error("noise depot doesn't exist")
-    sumpercent = 0.0
-    for i in ncat
-        catpath = joinpath(noise,i["name"])
-        if !DATA.verify_checksum(catpath)
+    for i in s.noise_groups
+        path = joinpath(s.root_noise,i["name"])
+        if !DATA.verify_checksum(path)
             info("checksum mismatch: updating level index...")
-            build_level_json(catpath, fs)
-            DATA.update_checksum(catpath)
+            build_level_json(path, s.sample_rate)
+            DATA.update_checksum(path)
         end
-        sumpercent += i["percent"]
     end
-    assert(99.999 < sumpercent < 100.001)
-    nle = Dict(x["name"] => JSON.parsefile(joinpath(noise, x["name"], "level.json")) for x in ncat)
-    nsp = Dict(x => shuffle([y for y in keys(nle[x]["DATA"])]) for x in keys(nle))
-
-
-    # 3. check speech integrety and build speech level
-    !isdir(voice) && error("voice depot doesn't exist")
-    if !DATA.verify_checksum(voice)
-        # this part is built via matlab scripts, migrade to julia soon
-        DATA.update_checksum(voice)
+    if !DATA.verify_checksum(s.root_speech)
+        # todo: speech dB rms via voicebox
+        DATA.update_checksum(s.root_speech)
     end
-    vle = JSON.parsefile(joinpath(voice,"level.json"))
-    vsp = shuffle([y for y in keys(vle["DATA"])])
 
+    data = Layout(s)
+    train_info = wavgen(s, data)
+    test_info = wavgen(s, data, flag="test")
 
-    # 5. mixing up
-    wavgen(s, nle, nsp, vle, vsp)
-    wavgen(s, nle, nsp, vle, vsp, flag="test")
-
-    nothing
+    return (data,train_info,test_info)
 end
 
 
@@ -445,83 +444,47 @@ end
 # 87+xxx.wav/mix
 # 87+xxx.wav/bm
 # bm and mix are matrix of form nfft/2+1-by-frames
-function feature(specifijson::String; flag="training")
+function feature(s::Specification, info; flag="train")
 
-    # mixed file and label info
-    s = JSON.parsefile(specifijson)
+    output = joinpath(s.root_mix, flag, "spectrum")
+    rm(output, force=true, recursive=true)
+    mkpath(output)
+    mat_files = Array{String,1}()
+    total_frames = 0
 
-    fs::Int64 = s["sample_rate"]
-    n_train::Int64 = s["training_samples"]
-    n_test::Int64 = s["test_samples"]
-    m::Int64 = s["feature"]["frame_length"]
-    hp::Int64 = s["feature"]["hop_length"]
+    for i in keys(info)
 
-    root = s["root"]
-    voice = s["voice_depot"]
-    noise = s["noise_depot"]
-
-    label = JSON.parsefile(joinpath(root, flag, "label.json"))
-    gain = JSON.parsefile(joinpath(root, flag, "gain.json"))
-    source = JSON.parsefile(joinpath(root, flag, "source.json"))
-
-    n = (flag=="training")? n_train:n_test
-    assert(n == length(label))
-    assert(n == length(gain))
-
-    # remove existing .h5 data
-    output = joinpath(root, flag, "spectrum.h5")
-    rm(output, force=true)
-    progress = UI.Progress(10)
-
-    for (i,v) in enumerate(keys(label))
-
-        # p = split(v[1:end-length(".wav")],"+")
-
-        x_mix, fs1 = WAV.wavread(v)
-        assert(typeof(fs)(fs1) == fs)
+        x_mix, sr = WAV.wavread(i)
+        assert(typeof(s.sample_rate)(sr) == s.sample_rate)
         x_mix = view(x_mix,:,1)
 
-        x_voice,fs2 = WAV.wavread(source[v][1])
-        assert(typeof(fs)(fs2) == fs)
+        x_voice,sr = WAV.wavread(info[i]["source"][1])
+        assert(typeof(s.sample_rate)(sr) == s.sample_rate)
         x_voice = view(x_voice,:,1)
-        x_voice .*= gain[v][1]
+        x_voice .*= info[i]["gain"][1]
 
-        # x_noise = WAV.wavread(source[v][2])
-        # x_noise = view(x_noise,:,1)
-        # x_noise .*= gain[v][2]
-
-        # retrive pure voice
         x_purevoice= zeros(size(x_mix))
-        for k in label[v]
+        for k in info[i]["label"]
             if k[2]-k[1]+1 == length(x_voice)
                 x_purevoice[k[1]:k[2]] = x_voice
             else
-                cyclic_extend!(view(x_purevoice,k[1]:k[2]), x_voice)
+                cyclic_extend!(x_voice, view(x_purevoice,k[1]:k[2]))
             end
         end
+        x_purenoise = x_mix - x_purevoice + rand(size(x_mix)) * (10^(-120/20))
+        # WAV.wavwrite(hcat(x_mix, x_purevoice, x_purenoise), i[1:end-length(".wav")]*"-decomp.wav",Fs=s.sample_rate)
 
-        # retrieve pure noise and add dithering
-        x_purenoise = x_mix - x_purevoice
-        srand(s["seed"])
-        dither = randn(size(x_purenoise)) * (10^(-120/20))
-        x_purenoise .+= dither
-
-
-        # for verification purpose
-        # v_ = v[1:end-length(".wav")]
-        # WAV.wavwrite(hcat(x_mix, x_purevoice, x_purenoise), v_*"-decomp.wav",Fs=fs)
-
-        𝕏m, h = STFT2.stft2(x_mix, m, hp, STFT2.sqrthann)
-        𝕏v, h = STFT2.stft2(x_purevoice, m, hp, STFT2.sqrthann)
-        𝕏n, h = STFT2.stft2(x_purenoise, m, hp, STFT2.sqrthann)
+        𝕏m, h = STFT2.stft2(x_mix, s.feature["frame_length"], s.feature["hop_length"], STFT2.sqrthann)
+        𝕏v, h = STFT2.stft2(x_purevoice, s.feature["frame_length"], s.feature["hop_length"], STFT2.sqrthann)
+        𝕏n, h = STFT2.stft2(x_purenoise, s.feature["frame_length"], s.feature["hop_length"], STFT2.sqrthann)
         bm = abs.(𝕏v) ./ (abs.(𝕏v) + abs.(𝕏n))
 
-        bv = basename(v)
-        HDF5.h5write(output, "$(bv)/bm", bm)
-        HDF5.h5write(output, "$(bv)/mix", abs.(𝕏m))
-        UI.update(progress, i, n)
+        total_frames += size(bm,2)
+        path_mat = joinpath(output, basename(i[1:end-4]*".mat"))
+        MAT.matwrite(path_mat, Dict("ratiomask"=>bm, "spectrum"=>abs.(𝕏m)))
+        push!(mat_files, path_mat)
     end
-    info("feature written to $(output)")
+    return (mat_files, total_frames)
 end
 
 
@@ -532,28 +495,17 @@ end
 
 # global variance:
 # remove old global.h5 and make new
-function statistics(specifijson; flag="training")
+function statistics(s::Specification, mat::Array{String,1}, frames::Int64; flag="train")
 
-    # read the specification for feature extraction
-    s = JSON.parsefile(specifijson)
-    root = s["root"]
     m = div(s["feature"]["frame_length"], 2) + 1
 
-    pathstat = joinpath(root, flag, "stat.h5")
-    rm(pathstat, force=true)
+    path_mat = joinpath(s.root_mix, flag, "statistics.mat")
+    rm(path_mat, force=true)
 
     fid = HDF5.h5open(joinpath(root, flag, "spectrum.h5"),"r")
     l = length(names(fid))
 
-    # get total frame count of training/test set
-    n = zero(Int128)
-    for (i,j) in enumerate(names(fid))
-        n += size(read(fid[j]["mix"]), 2)
-    end
-    info("global spectrum count($(flag)): $n")
 
-
-    # get global mean log power spectrum
     μ = zeros(m)
     σ = zeros(m)
     bm = zeros(m)
@@ -770,16 +722,11 @@ end
 
 
 
-function build(spec)
-
-    mix(spec)
-    feature(spec)
-    feature(spec, flag="test")
-    statistics(spec)
-    statistics(spec, flag="test")
-    groupspart = tensorsize_estimate(spec)
-    tensor(spec, groupspart)
-    tensor(spec, groupspart, flag="test")
+function build(path_specification)
+    s = Specification(path_specification)
+    data, train_info, test_info = mix(s)
+    train_spect_list,train_frames = feature(s, train_info)
+    test_spect_list,test_frames = feature(s, test_info, flag="test")
 end
 
 

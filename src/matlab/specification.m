@@ -8,7 +8,7 @@ specification.noise = 'D:\5-Workspace\GoogleAudioSet\NoSpeech\';
 specification.speech = 'D:\5-Workspace\Voice\';
 
 specification.speech_noise_time_ratio = 0.6;
-specification.split_ratio_for_training = 0.77;   % this is also time ratio
+specification.split_ratio_for_training = 0.75;   % this is also time ratio
 specification.speech_level_db = [-22.0 -32.0 -42.0];
 specification.snr = [20.0 15.0 10.0 5.0 0.0 -5.0];
 
