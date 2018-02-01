@@ -14,9 +14,9 @@ function tensor(s, label, mu, std, flag)
     for i = 1:n
         load(fullfile(path_spectrum,['s_' num2str(i) '.mat']), 'bm', 'spec');
         spec = sliding((spec - mu)./std, (s.feature.context_span-1)/2, s.feature.nat_frames);
-        bm = bm.';
-        spec = spec.';
-        save(fullfile(path_tensor,['t_' num2str(i) '.mat']), 'bm', 'spec');
+        bm = single(bm.');
+        spec = single(spec.');
+        save(fullfile(path_tensor,['t_' num2str(i) '.mat']), 'bm', 'spec', '-v6');
     end
     
 end

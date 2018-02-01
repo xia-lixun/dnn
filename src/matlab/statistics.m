@@ -4,8 +4,13 @@ function [mu_bm, mu_spec, std_bm, std_spec] = statistics(s, label, n_frames, fla
     path_spectrum = fullfile(s.root, flag, 'spectrum');
     
     % find out mu of bm and spec
-    mu_bm = zeros(s.feature.frame_length/2+1,1);
-    mu_spec = zeros(s.feature.frame_length/2+1,1);
+    load(fullfile(path_spectrum,'s_1.mat'), 'bm', 'spec');
+    mu_bm = zeros(size(bm,1),1);
+    std_bm = zeros(size(bm,1),1);
+    mu_spec = zeros(size(spec,1),1);
+    std_spec = zeros(size(spec,1),1);
+    clear bm;
+    clear spec;
     
     for i = 1:n
         load(fullfile(path_spectrum,['s_' num2str(i) '.mat']), 'bm', 'spec');
@@ -16,10 +21,7 @@ function [mu_bm, mu_spec, std_bm, std_spec] = statistics(s, label, n_frames, fla
     mu_spec = mu_spec / n_frames;
     
     
-    % find out std of bm and spec
-    std_bm = zeros(s.feature.frame_length/2+1,1);
-    std_spec = zeros(s.feature.frame_length/2+1,1);
-    
+    % find out std of bm and spec    
     for i = 1:n
         load(fullfile(path_spectrum,['s_' num2str(i) '.mat']), 'bm', 'spec');
         std_bm = std_bm + sum((bm - mu_bm).^2,2);

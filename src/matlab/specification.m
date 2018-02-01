@@ -21,6 +21,7 @@ specification.feature.frame_length = 512;
 specification.feature.hop_length = 128;
 specification.feature.context_span = 23;
 specification.feature.nat_frames = 14;
+specification.feature.mel_filter_banks = 26;
 
 
 %------------------------noise database----------------------------

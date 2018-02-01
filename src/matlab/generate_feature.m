@@ -16,6 +16,9 @@ function n_frames = generate_feature(s, label, flag)
     end
     delete(fullfile(path_ideal, '*.wav'));
     
+    % convert spectrum to tensor, using mel filter bank
+    fb = filter_banks(s.sample_rate, s.feature.frame_length, s.feature.mel_filter_banks, 0, s.sample_rate/2);
+    
     n_frames = 0;
     for i = 1:n
         % retrieve the mix/clean speech/noise clip
@@ -53,6 +56,7 @@ function n_frames = generate_feature(s, label, flag)
         
         bm = abs(h_speech)./(abs(h_speech)+abs(h_noise));
         spec = abs(h_mix);
+        spec = [spec; fb * spec];
         save(fullfile(path_spectrum,['s_' num2str(i) '.mat']), 'bm', 'spec');
         
         

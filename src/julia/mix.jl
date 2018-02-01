@@ -497,135 +497,57 @@ end
 # remove old global.h5 and make new
 function statistics(s::Specification, mat::Array{String,1}, frames::Int64; flag="train")
 
-    m = div(s["feature"]["frame_length"], 2) + 1
+    u = MAT.matread(mat[1])
+    ratiomask_size = size(u["ratiomask"],1)
+    spectrum_size = size(u["spectrum"],1)
 
     path_mat = joinpath(s.root_mix, flag, "statistics.mat")
     rm(path_mat, force=true)
 
-    fid = HDF5.h5open(joinpath(root, flag, "spectrum.h5"),"r")
-    l = length(names(fid))
-
-
-    μ = zeros(m)
-    σ = zeros(m)
-    bm = zeros(m)
-    μi = zeros(BigFloat, m, l)
-
+    μ_spectrum = zeros(spectrum_size)
+    σ_spectrum = zeros(spectrum_size)
+    μ_ratiomask = zeros(ratiomask_size)
+    
     function average!(feature::String, dest::Array{Float64,1})
-        for (i,j) in enumerate(names(fid))
-            x = read(fid[j][feature])
-            for k = 1:m
-                μi[k,i] = sum_kbn(view(x,k,:))
+        span = length(dest)
+        temp = zeros(BigFloat, span, length(mat))
+        for i in mat
+            x = MAT.matread(i)
+            for k = 1:span
+                temp[k,i] = sum_kbn(view(x[feature],k,:))
             end
         end
-        for k = 1:m
-            dest[k] = sum_kbn(view(μi,k,:))/n
+        for k = 1:span
+            dest[k] = sum_kbn(view(temp,k,:))/frames
         end
         nothing
     end
 
-    # UI.rewind(progress)
-    # for (i,j) in enumerate(names(fid))
-    #     x = read(fid[j]["mix"])
-    #     for k = 1:m
-    #         μi[k,i] = sum_kbn(view(x,k,:))
-    #     end
-    #     UI.update(progress, i, l)
-    # end
-    # for k = 1:m
-    #     μ[k] = sum_kbn(view(μi,k,:))/n
-    # end
-    average!("mix", μ)
-    average!("bm", bm)
-    info("global spectrum μ (dimentionless): $(mean(μ))")
-    info("global irm μ (dimentionless): $(mean(bm))")
+    average!("spectrum", μ_spectrum)
+    average!("ratiomask", μ_ratiomask)
+    println("global spectrum μ (dimentionless): $(mean(μ_spectrum))")
+    println("global ratiomask μ (dimentionless): $(mean(μ_spectrum))")
 
-    # get global std for unit variance
-    for(i,j) in enumerate(names(fid))
-        x = read(fid[j]["mix"])
-        for k = 1:m
-            μi[k,i] = sum_kbn((view(x,k,:)-μ[k]).^2)
+
+    temp = zeros(BigFloat, spectrum_size, length(mat))
+    for i in mat
+        x = MAT.matread(i)
+        for k = 1:spectrum_size
+            temp[k,i] = sum_kbn((view(x["spectrum"],k,:)-μ_spectrum[k]).^2)
         end
     end
-    for k = 1:m
-        σ[k] = sqrt(sum_kbn(view(μi,k,:))/(n-1))
+    for k = 1:spectrum_size
+        σ_spectrum[k] = sqrt(sum_kbn(view(temp,k,:))/(frames-1))
     end
-    info("global spectrum σ (dimentionless): $(mean(σ))")
+    println("global spectrum σ (dimentionless): $(mean(σ_spectrum))")
 
-    HDF5.h5write(pathstat, "mu", μ)
-    HDF5.h5write(pathstat, "std", σ)
-    HDF5.h5write(pathstat, "bm", bm)
-    HDF5.h5write(pathstat, "frames", Int64(n))
-    assert(n < typemax(Int64))
-    info("global results written to $(pathstat)")
 
-    close(fid)
+    MAT.matwrite(path_mat, Dict("mu_spectrum"=>μ_spectrum, "std_spectrum"=>σ_spectrum, "mu_ratiomask"=>μ_ratiomask, "frames"=>frames))
+    println("global statistics written to $(path_mat)")
+    return (μ_spectrum, σ_spectrum, μ_ratiomask)
 end
 
 
-
-function tensorsize_estimate(specifijson)
-    
-    s = JSON.parsefile(specifijson)
-    root = s["root"]
-    nfft = s["feature"]["frame_length"]
-    nat = s["feature"]["nat_frames"]
-    ntxt = s["feature"]["frame_context"]
-    limit = s["tensor_partition_size(MB)"]
-    assert(isodd(ntxt))
-
-    m = div(nfft, 2) + 1
-    r = div(ntxt-1, 2)
-    ph = (ntxt+1) * m
-
-    fid = HDF5.h5open(joinpath(root, "training", "spectrum.h5"),"r")
-    groups = names(fid)
-    index = rand(groups,10)
-
-    nf = zeros(Int64, 10)
-    for j = 1:10
-        nf[j] = size(read(fid[index[j]]["mix"]), 2)
-    end
-    data = zeros(ph, sum(nf))
-    label = zeros(m, sum(nf))
-    (start, fin) = borders(nf)
-
-    for j = 1:10
-        tmp = read(fid[index[j]]["mix"])
-        data[:, start[j]:fin[j]] = FEATURE.sliding(tmp, r, nat)
-        label[:, start[j]:fin[j]] = read(fid[index[j]]["bm"])    
-    end
-
-    # =========================output as bin/h5/compressed h5 file===========================
-
-    # pathout = joinpath(tempdir(), "tensor.bin")
-    # DATA.writebin(pathout, vcat(Float32.(data), Float32.(label)))
-
-    # option h5:
-    pathout = joinpath(tempdir(), "tensor.h5")
-    HDF5.h5write(pathout, "data", Float32.(data))
-    HDF5.h5write(pathout, "label", Float32.(label))
-    
-    # option h5 compressed:
-    # HDF5.h5open(pathout,"w") do file
-    #     file["/"]["data", "shuffle", (), "deflate", 4] = Float32.(data)
-    #     file["/"]["label", "shuffle", (), "deflate", 4] = Float32.(label)
-    # end
-
-    # =======================================================================================
-
-    # estimate number of bytes per group
-    bytes = div(filesize(pathout), 10)
-    limit = limit * 1024 * 1024
-    ngpp = div(limit, bytes)
-
-    info("bytes per group: $(bytes/1024) KB")
-    info("number of groups per partition: $(ngpp)")
-
-    rm(pathout)
-    close(fid)
-    ngpp
-end
 
 
 
