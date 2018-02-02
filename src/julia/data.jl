@@ -107,12 +107,12 @@ function resample(path_i::String, path_o::String, target_fs; source_type=".wav")
         assert(fs == typeof(fs)(target_fs))
         WAV.wavwrite(mean(x,2), p, Fs=fs, nbits=32)
         u[i] = size(x, 1)
-        info("$i/$n complete")
+        println("$i/$n complete")
     end
 
     rm(tm, force = true)
-    info("max: $(maximum(u) / target_fs) seconds")
-    info("min: $(minimum(u) / target_fs) seconds")
+    println("max: $(maximum(u) / target_fs) seconds")
+    println("min: $(minimum(u) / target_fs) seconds")
     nothing
 end
 
@@ -164,9 +164,9 @@ function deduplicate(path::String, t=".wav")
 
     open(joinpath(path,"dedup.log"),"w") do f 
         
-        info("Building checksum list...")
+        println("Building checksum list...")
         chk = [digest(i) for i in a]
-        info("Done.")
+        println("Done.")
 
         n = length(chk)
         hit::Bool = false
@@ -191,7 +191,7 @@ function deduplicate(path::String, t=".wav")
                 end
             end
         end
-        info("$redundent files removed")
+        println("$redundent files removed")
     end
     nothing
 end

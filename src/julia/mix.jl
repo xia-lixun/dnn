@@ -11,27 +11,31 @@ import JSON
 
 include("feature.jl")
 include("forward.jl")
-include("ui.jl")
 include("data.jl")
-include("stft2.jl")
+
 
 
 
 struct Specification
 
+    seed::Int64    
     root_mix::String
     root_speech::String
     root_noise::String
+
     sample_rate::Int64
     dbspl::Array{Float64,1}
     snr::Array{Float64,1}
+
     time_ratio::Float64
     split_ratio::Float64
+
     train_seconds::Float64
     test_seconds::Float64
-    seed::Int64
+
     feature::Dict{String,Int64}
     noise_groups::Array{Dict{String,Any},1}
+
 
     function Specification(path_json)
         s = JSON.parsefile(path_json)
@@ -41,22 +45,25 @@ struct Specification
         end
         assert(99.9 < sum_percent < 100.1)
         new(
-            s["root_mix"],s["root_speech"],s["root_noise"],s["sample_rate"],s["speech_level_db"],s["snr"],
-            s["speech_noise_time_ratio"],s["train_test_split_ratio"],s["train_seconds"],s["test_seconds"],
-            s["random_seed"],s["feature"],s["noise_groups"]
+            s["random_seed"],s["root_mix"],s["root_speech"],s["root_noise"],
+            s["sample_rate"],s["speech_level_db"],s["snr"],
+            s["speech_noise_time_ratio"],s["train_test_split_ratio"],
+            s["train_seconds"],s["test_seconds"],
+            s["feature"],s["noise_groups"]
             )
     end
 end
 
 
 struct Layout
+
     noise_levels
     noise_keys
     noise_split
 
     speech_levels
     speech_keys
-    speech_ratio  # actual split ratio
+    speech_ratio  # the actual split ratio
     speech_point  # train-test split point
 
     function Layout(s::Specification)
@@ -73,11 +80,6 @@ struct Layout
 end
 
 
-
-
-
-
-#generate template JSON file based on folder contents
 function generate_specification()
 
     x = Array{Dict{String,Any},1}()
@@ -93,7 +95,7 @@ function generate_specification()
         "train_seconds" => 1000,
         "test_seconds" => 1000,
         "random_seed" => 42,
-        "feature" => Dict("frame_length"=>512, "hop_length"=>128, "frame_context"=>11, "nat_frames"=>7),
+        "feature" => Dict("frame_length"=>512, "hop_length"=>128, "context_frames"=>11, "nat_frames"=>7),
         "noise_groups" => x
         )
     for i in DATA.list(a["noise_depot"])
@@ -109,12 +111,10 @@ function generate_specification()
     for i in a["noise_categories"]
         p = joinpath(a["noise_depot"],i["name"])
         DATA.touch_checksum(p)
-        info("checksum written to $p")
+        println("checksum written to $p")
     end
     nothing
 end
-
-
 
 
 function build_level_index(path, rate)
@@ -128,7 +128,6 @@ function build_level_index(path, rate)
     leng = zeros(Int64, n)
 
     # wav must be monochannel and fs==rate
-    p = UI.Progress(10)
     for (i,v) in enumerate(a)
         try
             x, fs = WAV.wavread(v)
@@ -142,12 +141,11 @@ function build_level_index(path, rate)
         catch
             warn(v)
         end
-        UI.update(p, i, n)
     end
 
     index = joinpath(path, "index.level")
     writedlm(index, [a lpek lrms lmed leng], ',')
-    info("index build to $index")
+    println("index build to $index")
     nothing
 end
 
@@ -185,9 +183,10 @@ function build_level_json(path, rate::Int64)
     open(index, "w") do f
         write(f,JSON.json(d))
     end
-    info("index written to $index")
+    println("index written to $index")
     nothing
 end
+
 
 
 
@@ -227,8 +226,6 @@ function borders(partition)
     (beg,fin)
 end
 
-
-
 function timesplit(x, ratio)
     xs = cumsum(x)
     minval, offset = findmin(abs.(xs / xs[end] - ratio))
@@ -238,7 +235,14 @@ end
 
 
 
+
+
+
+
+
 function wavgen(s::Specification, data::Layout; flag="train")
+# return: information that reconstructs source components
+# side-effect: write mixed wav files to /flag/wav/*.wav
 
     gain = Dict{String, Array{Float64,1}}()
     label = Dict{String, Array{Tuple{Int64, Int64},1}}()
@@ -391,18 +395,20 @@ function wavgen(s::Specification, data::Layout; flag="train")
         println("$(name) processed")
     end
 
-    info = Dict(x => Dict("label"=>label[x], "gain"=>gain[x], "source"=>source[x]) for x in keys(label))
+    decomp_info = Dict(x => Dict("label"=>label[x], "gain"=>gain[x], "source"=>source[x]) for x in keys(label))
     open(joinpath(s.root_mix, flag, "info.json"),"w") do f
-        write(f, JSON.json(info))
+        write(f, JSON.json(decomp_info))
     end
-    return info
+    return decomp_info
 end
 
 
 
 
-# mix procedure implements the specification
 function mix(s::Specification)
+# return: data layout as information of the original components
+#         mixture information of the training and test dataset
+# side-effect: same as wavgen()
 
     srand(s.seed)
     !isdir(s.root_noise) && error("noise depot doesn't exist")
@@ -414,7 +420,7 @@ function mix(s::Specification)
     for i in s.noise_groups
         path = joinpath(s.root_noise,i["name"])
         if !DATA.verify_checksum(path)
-            info("checksum mismatch: updating level index...")
+            println("checksum mismatch: updating level index...")
             build_level_json(path, s.sample_rate)
             DATA.update_checksum(path)
         end
@@ -434,37 +440,31 @@ end
 
 
 
+function feature(s::Specification, decomp_info; flag="train")
+# return: nothing
+# side-effect: write ||spectrum|| and ratiomask to flag/spectrum/*.mat files in float64
 
+    spectrum_dir = joinpath(s.root_mix, flag, "spectrum")
+    rm(spectrum_dir, force=true, recursive=true)
+    mkpath(spectrum_dir)
 
+    oracle_dir = joinpath(s.root_mix, flag, "oracle")
+    rm(oracle_dir, force=true, recursive=true)
+    mkpath(oracle_dir)
 
-
-
-
-# remove old feature.h5 and make new
-# 87+xxx.wav/mix
-# 87+xxx.wav/bm
-# bm and mix are matrix of form nfft/2+1-by-frames
-function feature(s::Specification, info; flag="train")
-
-    output = joinpath(s.root_mix, flag, "spectrum")
-    rm(output, force=true, recursive=true)
-    mkpath(output)
-    mat_files = Array{String,1}()
-    total_frames = 0
-
-    for i in keys(info)
+    for i in keys(decomp_info)
 
         x_mix, sr = WAV.wavread(i)
         assert(typeof(s.sample_rate)(sr) == s.sample_rate)
         x_mix = view(x_mix,:,1)
 
-        x_voice,sr = WAV.wavread(info[i]["source"][1])
+        x_voice,sr = WAV.wavread(decomp_info[i]["source"][1])
         assert(typeof(s.sample_rate)(sr) == s.sample_rate)
         x_voice = view(x_voice,:,1)
-        x_voice .*= info[i]["gain"][1]
+        x_voice .*= decomp_info[i]["gain"][1]
 
         x_purevoice= zeros(size(x_mix))
-        for k in info[i]["label"]
+        for k in decomp_info[i]["label"]
             if k[2]-k[1]+1 == length(x_voice)
                 x_purevoice[k[1]:k[2]] = x_voice
             else
@@ -474,255 +474,182 @@ function feature(s::Specification, info; flag="train")
         x_purenoise = x_mix - x_purevoice + rand(size(x_mix)) * (10^(-120/20))
         # WAV.wavwrite(hcat(x_mix, x_purevoice, x_purenoise), i[1:end-length(".wav")]*"-decomp.wav",Fs=s.sample_rate)
 
-        𝕏m, h = STFT2.stft2(x_mix, s.feature["frame_length"], s.feature["hop_length"], STFT2.sqrthann)
-        𝕏v, h = STFT2.stft2(x_purevoice, s.feature["frame_length"], s.feature["hop_length"], STFT2.sqrthann)
-        𝕏n, h = STFT2.stft2(x_purenoise, s.feature["frame_length"], s.feature["hop_length"], STFT2.sqrthann)
-        bm = abs.(𝕏v) ./ (abs.(𝕏v) + abs.(𝕏n))
+        𝕏m, hm = FEATURE.stft2(x_mix, s.feature["frame_length"], s.feature["hop_length"], FEATURE.sqrthann)
+        𝕏v, h = FEATURE.stft2(x_purevoice, s.feature["frame_length"], s.feature["hop_length"], FEATURE.sqrthann)
+        𝕏n, h = FEATURE.stft2(x_purenoise, s.feature["frame_length"], s.feature["hop_length"], FEATURE.sqrthann)
+        ratiomask_oracle = abs.(𝕏v) ./ (abs.(𝕏v) + abs.(𝕏n))
+        MAT.matwrite(joinpath(spectrum_dir, basename(i[1:end-4]*".mat")), Dict("ratiomask"=>ratiomask_oracle, "spectrum"=>abs.(𝕏m)))
 
-        total_frames += size(bm,2)
-        path_mat = joinpath(output, basename(i[1:end-4]*".mat"))
-        MAT.matwrite(path_mat, Dict("ratiomask"=>bm, "spectrum"=>abs.(𝕏m)))
-        push!(mat_files, path_mat)
-    end
-    return (mat_files, total_frames)
-end
-
-
-
-
-
-
-
-# global variance:
-# remove old global.h5 and make new
-function statistics(s::Specification, mat::Array{String,1}, frames::Int64; flag="train")
-
-    u = MAT.matread(mat[1])
-    ratiomask_size = size(u["ratiomask"],1)
-    spectrum_size = size(u["spectrum"],1)
-
-    path_mat = joinpath(s.root_mix, flag, "statistics.mat")
-    rm(path_mat, force=true)
-
-    μ_spectrum = zeros(spectrum_size)
-    σ_spectrum = zeros(spectrum_size)
-    μ_ratiomask = zeros(ratiomask_size)
-    
-    function average!(feature::String, dest::Array{Float64,1})
-        span = length(dest)
-        temp = zeros(BigFloat, span, length(mat))
-        for i in mat
-            x = MAT.matread(i)
-            for k = 1:span
-                temp[k,i] = sum_kbn(view(x[feature],k,:))
-            end
-        end
-        for k = 1:span
-            dest[k] = sum_kbn(view(temp,k,:))/frames
-        end
-        nothing
-    end
-
-    average!("spectrum", μ_spectrum)
-    average!("ratiomask", μ_ratiomask)
-    println("global spectrum μ (dimentionless): $(mean(μ_spectrum))")
-    println("global ratiomask μ (dimentionless): $(mean(μ_spectrum))")
-
-
-    temp = zeros(BigFloat, spectrum_size, length(mat))
-    for i in mat
-        x = MAT.matread(i)
-        for k = 1:spectrum_size
-            temp[k,i] = sum_kbn((view(x["spectrum"],k,:)-μ_spectrum[k]).^2)
-        end
-    end
-    for k = 1:spectrum_size
-        σ_spectrum[k] = sqrt(sum_kbn(view(temp,k,:))/(frames-1))
-    end
-    println("global spectrum σ (dimentionless): $(mean(σ_spectrum))")
-
-
-    MAT.matwrite(path_mat, Dict("mu_spectrum"=>μ_spectrum, "std_spectrum"=>σ_spectrum, "mu_ratiomask"=>μ_ratiomask, "frames"=>frames))
-    println("global statistics written to $(path_mat)")
-    return (μ_spectrum, σ_spectrum, μ_ratiomask)
-end
-
-
-
-
-
-# ngpp: number of groups per partition
-function tensor(specifijson, ngpp; flag="training")
-
-    s = JSON.parsefile(specifijson)
-    root = s["root"]
-    nfft = s["feature"]["frame_length"]
-    nat = s["feature"]["nat_frames"]
-    ntxt = s["feature"]["frame_context"]
-    assert(isodd(ntxt))
-
-    tensordir = joinpath(root, flag, "tensor")
-    mkpath(tensordir)
-    tensorlist = DATA.list(tensordir, t=".h5")
-    for i in tensorlist
-        rm(i, force=true)
-    end
-
-    m = div(nfft, 2) + 1
-    r = div(ntxt-1, 2)
-    ph = (ntxt+1) * m
-
-    # extract global stat info
-    # note that the global stat must be of training
-    stat = joinpath(root, "training", "stat.h5")
-    # n = h5read(stat,"frames")
-    μ = HDF5.h5read(stat,"mu")
-    σ = HDF5.h5read(stat,"std")
-
-    # context processing
-    fid = HDF5.h5open(joinpath(root, flag, "spectrum.h5"),"r")
-    groups = names(fid)
-
-
-    # gb: group bias
-    # np: number of groups to be processed
-    function tensorblock(gb, np, k)
-
-        nf = zeros(Int64, np)  # size of each group
-        for j = 1:np
-            nf[j] = size(read(fid[groups[gb+j]]["mix"]), 2)
-        end
-        data = zeros(ph, sum(nf))
-        label = zeros(m, sum(nf))
-        (start, fin) = borders(nf)
-
-        progress = UI.Progress(10)    
-        for j = 1:np
-            local p = gb+j
-            tmp = read(fid[groups[p]]["mix"])
-            tmp = (tmp.-μ)./σ
-            data[:, start[j]:fin[j]] = FEATURE.sliding(tmp, r, nat)
-            label[:, start[j]:fin[j]] = read(fid[groups[p]]["bm"])
-            UI.update(progress, j, np)
-        end
-
-        # =========================output as bin/h5/compressed h5 file===========================
-
-        # pathout = joinpath(tensordir, "tensor_$k.bin")
-        # DATA.writebin(pathout, vcat(Float32.(data), Float32.(label)))
-        
-        pathout = joinpath(tensordir, "tensor_$k.h5")
-        HDF5.h5write(pathout, "data", Float32.(data))
-        HDF5.h5write(pathout, "label", Float32.(label))
-
-        # HDF5.h5open(pathout,"w") do file
-        #     file["/"]["data", "shuffle", (), "deflate", 4] = Float32.(data)
-        #     file["/"]["label", "shuffle", (), "deflate", 4] = Float32.(label)
-        # end
-
-        # =======================================================================================
-        nothing
-    end
-
-    t = 0
-    i = 0
-    while i+ngpp <= length(groups)
-        tensorblock(i, ngpp, t)
-        info("partition $t ok")
-        i += ngpp
-        t += 1
-    end
-    remain = length(groups)-i
-    remain > 0 && (tensorblock(i,remain,t); info("partition $t ok"))
-    close(fid)
-end
-
-
-
-
-
-
-
-
-function build(path_specification)
-    s = Specification(path_specification)
-    data, train_info, test_info = mix(s)
-    train_spect_list,train_frames = feature(s, train_info)
-    test_spect_list,test_frames = feature(s, test_info, flag="test")
-end
-
-
-
-
-
-
-function process_validset(specification::String, dataset::String, model::String)
-
-    s = JSON.parsefile(specification)   
-    root = s["root"]
-    nfft = s["feature"]["frame_length"]
-    nhp = s["feature"]["hop_length"]
-    nat = s["feature"]["nat_frames"]
-    ntxt = s["feature"]["frame_context"]
-    assert(isodd(ntxt))
-
-    # get global mu and std
-    stat = joinpath(root, "training", "stat.h5")
-    μ = Float32.(HDF5.h5read(stat, "mu"))
-    σ = Float32.(HDF5.h5read(stat, "std"))
-
-    nn = FORWARD.TF{Float32}(model)
-    bm = Dict{String, Array{Float32,2}}()
-
-    # load the train/test spectrum+bm dataset
-    tid = HDF5.h5open(joinpath(root,"training","spectrum.h5"),"r")
-    vid = HDF5.h5open(joinpath(root,"test","spectrum.h5"),"r")
-
-    dset = DATA.list(dataset, t=".wav")
-    for i in dset
-        bm[i] = FORWARD.vola_processing(nfft, nhp, nat, ntxt, μ, σ, tid, vid, i, nn)
-    end
-    
-    close(vid)
-    close(tid)
-    
-    # log bm error to dataset/../bmerr.h5 
-    path5 = joinpath(realpath(joinpath(dataset, "..")), "bmerr.h5")
-    HDF5.h5open(path5,"w") do file
-        for i in keys(bm)
-            # HDF5.h5write(path5, i, bm[i])
-            file["/"][i, "shuffle", (), "deflate", 4] = bm[i]
-        end
+        # oracle performance
+        𝕏m .*= ratiomask_oracle
+        oracle = FEATURE.stft2(𝕏m, hm, s.feature["frame_length"], s.feature["hop_length"], FEATURE.sqrthann)
+        WAV.wavwrite(2oracle, joinpath(oracle_dir,i[1:end-4]*"_oracle.wav"), Fs=s.sample_rate)
     end
     nothing
 end
 
 
 
-function benchmark(specification::String, bmerr::String)
 
-    s = JSON.parsefile(specification)   
-    m = div(s["feature"]["frame_length"],2)+1
+function statistics(s::Specification, flag="train")
+# return: dictionary ["mu_spectrum"],["std_spectrum"],["mu_ratiomask"],["frames"]
+# side-effect: write dictionary aforementioned to /flag/statistics.mat
 
-    file = HDF5.h5open(bmerr, "r")
-    bm = [(i, mean(read(file[i]),1), mean(read(file[i]),2)) for i in names(file)]
-    close(file)
+    spectrum_list = DATA.list(joinpath(s.root_mix, flag, "spectrum"), t=".mat")
 
-    # bm average over the whole batch
-    function gobal_average()
-        av = zeros(Float32, m)
-        for i in bm
-            av .+= vec(i[3])
+    # detect dimensions
+    spectrum_size = 0
+    ratiomask_size = 0
+    spectrum_frames = 0
+    ratiomask_frames = 0
+
+    for i in spectrum_list
+        u = MAT.matread(spectrum_list[i])
+        spectrum_frames += size(u["spectrum"],2)
+        ratiomask_frames += size(u["ratiomask"],2)
+        if i == 1
+            spectrum_size = size(u["spectrum"],1)
+            ratiomask_size = size(u["ratiomask"],1)
         end
-        av .= av ./ length(bm)
+    end
+    assert(spectrum_frames == ratiomask_frames)
+    μ_spectrum = zeros(spectrum_size,1)
+    σ_spectrum = zeros(spectrum_size,1)
+    μ_ratiomask = zeros(ratiomask_size,1)
+
+
+    # closure capture: spectrum_list
+    function average!(feature::String, n::Int64, dest::Array{Float64,2})
+
+        temp = zeros(BigFloat, size(dest,1), length(spectrum_list))
+        for i in spectrum_list
+            x = MAT.matread(i)
+            for k = 1:size(dest,1)
+                temp[k,i] = sum_kbn(view(x[feature],k,:))
+            end
+        end
+        for k = 1:size(dest,1)
+            dest[k] = sum_kbn(view(temp,k,:))/n
+        end
+        nothing
     end
 
-    (gobal_average(),bm)
+    average!("spectrum", spectrum_frames, μ_spectrum)
+    average!("ratiomask", ratiomask_frames, μ_ratiomask)
+    println("global spectrum μ (dimentionless): $(mean(μ_spectrum))")
+    println("global ratiomask μ (dimentionless): $(mean(μ_ratiomask))")
 
-    # sort!(bm, by=x->sum(x[3]), rev=true)                # worst case by all bins
-    # sort!(bm, by=x->sum(view(x[3],13:37,:)), rev=true)  # worst case by bin 13 to 37
-    # sort!(bm, by=x->maximum(x[2]), rev=true)            # worst case by highest dm deviation in frames
+
+    temp = zeros(BigFloat, spectrum_size, length(spectrum_list))
+    for i in spectrum_list
+        x = MAT.matread(i)
+        for k = 1:spectrum_size
+            temp[k,i] = sum_kbn((view(x["spectrum"],k,:)-μ_spectrum[k]).^2)
+        end
+    end
+    for k = 1:spectrum_size
+        σ_spectrum[k] = sqrt(sum_kbn(view(temp,k,:))/(spectrum_frames-1))
+    end
+    println("global spectrum σ (dimentionless): $(mean(σ_spectrum))")
+
+    statistics = Dict("mu_spectrum"=>μ_spectrum, "std_spectrum"=>σ_spectrum, "mu_ratiomask"=>μ_ratiomask, "frames"=>spectrum_frames)
+    path_stat = joinpath(s.root_mix, flag, "statistics.mat")
+    rm(path_stat, force=true)
+    MAT.matwrite(path_stat, statistics)
+    println("global statistics written to $(path_stat)")
+
+    return statistics
 end
+
+
+
+
+function tensor(s::Specification; flag="train")
+# return: nothing
+# side-effect: write tensors to /flag/tensor/*.mat
+
+    stat = MAT.matread(joinpath(s.root_mix, flag, "statistics.mat"))
+
+    tensor_dir = joinpath(s.root_mix, flag, "tensor")
+    mkpath(tensor_dir)
+    tensor_list = DATA.list(tensor_dir, t=".mat")
+    for i in tensor_list
+        rm(i, force=true)
+    end
+    
+    for i in DATA.list(joinpath(s.root_mix, flag, "spectrum"), t=".mat")
+        data = MAT.matread(i)
+        variable = Float32.(FEATURE.sliding((data["spectrum"].-stat["mu_spectrum"])./stat["std_spectrum"], div(s.feature["context_frames"]-1,2), s.feature["nat_frames"]))
+        label = Float32.(data["ratiomask"])
+        MAT.matwrite(joinpath(tensor_dir, basename(i[1:end-4])*".mat"), Dict("variable"=>transpose(variable), "label"=>transpose(label)))
+    end
+    nothing
+end
+
+
+
+
+function build(path_specification)
+# This is the main function to generate tensors for training
+
+    s = Specification(path_specification)
+    data, info_train, info_test = mix(s)
+    feature(s, info_train)
+    feature(s, info_test, flag="test")
+    stat_train = statistics(s)
+    stat_test = statistics(s, flag="test")
+    tensor(s)
+    tensor(s, flag="test")
+
+    return (data, info_train, info_test, stat_train, stat_test)
+end
+
+
+
+
+function process_dataset(s::Specification, wav_dir::String, model_file::String, stat_file::String)
+
+    stat = FORWARD.Stat{Float32}(stat_file)
+    nn = FORWARD.NeuralNet_FC{Float32}(model_file)
+    
+    ratiomask_infer = Dict{String, Array{Float32,2}}()
+    for i in DATA.list(wav_dir, t=".wav")
+        ratiomask_infer[i] = FORWARD.reconstruct(nn, stat, i, s.feature["frame_length"], s.feature["hop_length"], div(s.feature["context_frames"]-1,2), s.feature["nat_frames"])
+    end
+    
+    nothing
+end
+
+
+
+
+
+
+
+# function benchmark(specification::String, bmerr::String)
+
+#     s = JSON.parsefile(specification)   
+#     m = div(s["feature"]["frame_length"],2)+1
+
+#     file = HDF5.h5open(bmerr, "r")
+#     bm = [(i, mean(read(file[i]),1), mean(read(file[i]),2)) for i in names(file)]
+#     close(file)
+
+#     # bm average over the whole batch
+#     function gobal_average()
+#         av = zeros(Float32, m)
+#         for i in bm
+#             av .+= vec(i[3])
+#         end
+#         av .= av ./ length(bm)
+#     end
+
+#     (gobal_average(),bm)
+
+#     # sort!(bm, by=x->sum(x[3]), rev=true)                # worst case by all bins
+#     # sort!(bm, by=x->sum(view(x[3],13:37,:)), rev=true)  # worst case by bin 13 to 37
+#     # sort!(bm, by=x->maximum(x[2]), rev=true)            # worst case by highest dm deviation in frames
+# end
 
 
 

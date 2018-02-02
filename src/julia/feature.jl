@@ -1,6 +1,102 @@
 module FEATURE
 
 
+using Polynomials
+
+
+# bilinear transformation of transfer function from s-domain to z-domain
+# via s = 2/T (z-1)/(z+1)
+# let ζ = z^(-1) we have s = -2/T (ζ-1)/(ζ+1)
+# 
+#          b_m s^m + b_(m-1) s^(m-1) + ... + b_1 s + b_0
+# H(s) = -------------------------------------------------
+#          a_n s^n + a_(n-1) s^(n-1) + ... + a_1 s + a_0
+#
+# So 
+#
+#          b_m (-2/T)^m (ζ-1)^m / (ζ+1)^m  + ... + b_1 (-2/T) (ζ-1)/(ζ+1) + b_0 
+# H(ζ) = -------------------------------------------------------------------------
+#          a_n (-2/T)^n (ζ-1)^n / (ζ+1)^n  + ... + a_1 (-2/T) (ζ-1)/(ζ+1) + a_0
+#
+# Since we assume H(s) is rational, so n ≥ m, multiply num/den with (ζ+1)^n ans we have
+#
+#          b_m (-2/T)^m (ζ-1)^m (ζ+1)^(n-m)  + b_(m-1) (-2/T)^(m-1) (ζ-1)^(m-1) (ζ+1)^(n-m+1) + ... + b_1 (-2/T) (ζ-1)(ζ+1)^(n-1) + b_0 (ζ+1)^n
+# H(ζ) = ---------------------------------------------------------------------------------------------------------------------------------------
+#          a_n (-2/T)^n (ζ-1)^n  + a_(n-1) (-2/T)^(n-1) (ζ-1)^(n-1) (ζ+1) ... + a_1 (-2/T) (ζ-1)(ζ+1)^(n-1) + a_0 (ζ+1)^n
+#
+#
+#         B[0] + B[1]ζ + B[2]ζ^2 + ... B[m]ζ^m
+# H(ζ) = ---------------------------------------
+#         A[0] + A[1]ζ + A[2]ζ^2 + ... A[n]ζ^n
+
+function bilinear(b, a, fs)
+
+    m = size(b,1)-1
+    n = size(a,1)-1
+    p = Polynomials.Poly{BigFloat}(BigFloat(0))
+    q = Polynomials.Poly{BigFloat}(BigFloat(0))
+
+    br = convert(Array{BigFloat,1}, flipdim(b,1))
+    ar = convert(Array{BigFloat,1}, flipdim(a,1))
+
+    for i = m:-1:0
+        p = p + (br[i+1] * (BigFloat(-2*fs)^i) * poly(convert(Array{BigFloat,1},ones(i))) * poly(convert(Array{BigFloat,1},-ones(n-i))))
+    end
+    for i = n:-1:0
+        q = q + (ar[i+1] * (BigFloat(-2*fs)^i) * poly(convert(Array{BigFloat,1},ones(i))) * poly(convert(Array{BigFloat,1},-ones(n-i))))        
+    end
+    
+    num = zeros(Float64,n+1)
+    den = zeros(Float64,n+1)
+    for i = 0:n
+        num[i+1] = Float64(p[i])        
+    end
+    for i = 0:n
+        den[i+1] = Float64(q[i])        
+    end
+    g = den[1]
+    (num/g, den/g)
+end
+
+
+
+function convolve(a::Array{T,1}, b::Array{T,1}) where T <: Real
+    m = size(a,1)
+    n = size(b,1)
+    l = m+n-1
+    y = Array{T,1}(l)
+
+    for i = 0:l-1
+        i1 = i
+        tmp = zero(T)
+        for j = 0:n-1
+            ((i1>=0) & (i1<m)) && (tmp += a[i1+1]*b[j+1])
+            i1 -= 1
+        end
+        y[i+1] = tmp
+    end
+    y
+end
+
+
+
+# example: create a-weighting filter in z-domain
+function weighting_a(fs)
+    
+    f1 = 20.598997
+    f2 = 107.65265
+    f3 = 737.86223
+    f4 = 12194.217
+    A1000 = 1.9997
+
+    p = [ ((2π*f4)^2) * (10^(A1000/20)), 0, 0, 0, 0 ]
+    q = convolve(convert(Array{BigFloat,1}, [1, 4π*f4, (2π*f4)^2]), convert(Array{BigFloat,1}, [1, 4π*f1, (2π*f1)^2]))
+    q = convolve(convolve(q, convert(Array{BigFloat,1}, [1, 2π*f3])),convert(Array{BigFloat,1}, [1, 2π*f2]))
+    
+    #(p, convert(Array{Float64,1},q))
+    num_z, den_z = bilinear(p, q, fs)
+end
+
 
 
 AWEIGHT_48kHz_BA = [0.234301792299513 -0.468603584599025 -0.234301792299515 0.937207169198055 -0.234301792299515 -0.468603584599025 0.234301792299512;
@@ -77,6 +173,8 @@ function hann(T, n; flag="")
     lowercase(flag) == "periodic" && (return ω[1:end-1])
     ω
 end
+
+sqrthann(T,n) = sqrt.(hann(T,n,flag="periodic"))
 
 
 
@@ -309,5 +407,95 @@ rms(x) = sqrt(sum((x-mean(x)).^2)/length(x))
 
 
 
-# module
+
+
+
+
+
+
+
+
+function stft2(x::AbstractArray{T,1}, sz::Int64, hp::Int64, wn) where T <: AbstractFloat
+# filter bank with square-root hann window for hard/soft masking
+# short-time fourier transform
+# input:
+#     x    input time series
+#     sz   size of the fft
+#     hp   hop size in samples
+#     wn   window to use
+#     sr   sample rate
+# output:
+#     𝕏    complex STFT output (DC to Nyquist)
+#     h    unpacked sample length of the signal in time domain
+
+    p = Frame1D{Int64}(0, sz, hp, 0)
+    𝕏,h = spectrogram(x, p, sz, window=wn, zero_init=true)
+    𝕏,h
 end
+
+
+
+function stft2(𝕏::AbstractArray{Complex{T},2}, h::Int64, sz::Int64, hp::Int64, wn) where T <: AbstractFloat
+# input:
+#    𝕏   complex spectrogram (DC to Nyquist)
+#    h   unpacked sample length of the signal in time domain
+# output time series reconstructed
+
+    𝕎 = wn(T,sz) ./ (T(sz/hp))
+    𝕏 = vcat(𝕏, conj!(𝕏[end-1:-1:2,:]))
+    𝕏 = real(ifft(𝕏,1)) .* 𝕎
+
+    y = zeros(T,h)
+    n = size(𝕏,2)
+    for k = 0:n-1
+        y[k*hp+1 : k*hp+sz] .+= 𝕏[:,k+1]
+    end
+    y
+end
+
+
+
+function idealsoftmask_aka_oracle(x1,x2,fs)
+# Demo function    
+# x1,fs = WAV.wavread("D:\\Git\\dnn\\stft_example\\sound001.wav")
+# x2,fs = WAV.wavread("D:\\Git\\dnn\\stft_example\\sound002.wav")
+
+    x1 = view(x1,:,1)
+    x2 = view(x2,:,1)
+
+    M = min(length(x1), length(x2))
+    x1 = view(x1,1:M)
+    x2 = view(x2,1:M)
+    x = x1 + x2
+
+    nfft = 1024
+    hp = div(nfft,4)
+
+    pmix, h0 = stft2(x, nfft, hp, sqrthann)
+    px1, h1 = stft2(x1, nfft, hp, sqrthann)
+    px2, h2 = stft2(x2, nfft, hp, sqrthann)
+
+    bm = abs.(px1) ./ (abs.(px1) + abs.(px2))
+    py1 = bm .* pmix
+    py2 = (1-bm) .* pmix
+
+    scale = 2
+    y = stft2(pmix, h0, nfft, hp, sqrthann) * scale
+    y1 = stft2(py1, h0, nfft, hp, sqrthann) * scale
+    y2 = stft2(py2, h0, nfft, hp, sqrthann) * scale
+
+    y = view(y,1:M)
+    y1 = view(y1,1:M)
+    y2 = view(y2,1:M)
+
+    delta = 10log10(sum(abs.(x-y).^2)/sum(x.^2))
+    bm,y1,y2
+    #histogram(bm[100,:])
+end
+    
+
+
+
+
+
+end # module
