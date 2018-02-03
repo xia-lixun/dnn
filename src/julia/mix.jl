@@ -483,7 +483,7 @@ function feature(s::Specification, decomp_info; flag="train")
         # oracle performance
         𝕏m .*= ratiomask_oracle
         oracle = FEATURE.stft2(𝕏m, hm, s.feature["frame_length"], s.feature["hop_length"], FEATURE.sqrthann)
-        WAV.wavwrite(2oracle, joinpath(oracle_dir,i[1:end-4]*"_oracle.wav"), Fs=s.sample_rate)
+        WAV.wavwrite(2oracle, joinpath(oracle_dir,basename(i[1:end-4]*"_oracle.wav")), Fs=s.sample_rate)
     end
     nothing
 end
@@ -491,7 +491,7 @@ end
 
 
 
-function statistics(s::Specification, flag="train")
+function statistics(s::Specification; flag = "train")
 # return: dictionary ["mu_spectrum"],["std_spectrum"],["mu_ratiomask"],["frames"]
 # side-effect: write dictionary aforementioned to /flag/statistics.mat
 
@@ -503,15 +503,19 @@ function statistics(s::Specification, flag="train")
     spectrum_frames = 0
     ratiomask_frames = 0
 
-    for i in spectrum_list
-        u = MAT.matread(spectrum_list[i])
+    for (k,i) in enumerate(spectrum_list)
+        u = MAT.matread(i)
         spectrum_frames += size(u["spectrum"],2)
         ratiomask_frames += size(u["ratiomask"],2)
-        if i == 1
+        if k == 1
             spectrum_size = size(u["spectrum"],1)
             ratiomask_size = size(u["ratiomask"],1)
         end
     end
+    println("spectrum_size = $(spectrum_size)")
+    println("spectrum_frames = $(spectrum_frames)")
+    println("ratiomask = $(ratiomask_size)")
+    println("ratiomask_frames = $(ratiomask_frames)")
     assert(spectrum_frames == ratiomask_frames)
     μ_spectrum = zeros(spectrum_size,1)
     σ_spectrum = zeros(spectrum_size,1)
@@ -522,10 +526,10 @@ function statistics(s::Specification, flag="train")
     function average!(feature::String, n::Int64, dest::Array{Float64,2})
 
         temp = zeros(BigFloat, size(dest,1), length(spectrum_list))
-        for i in spectrum_list
+        for (j,i) in enumerate(spectrum_list)
             x = MAT.matread(i)
             for k = 1:size(dest,1)
-                temp[k,i] = sum_kbn(view(x[feature],k,:))
+                temp[k,j] = sum_kbn(view(x[feature],k,:))
             end
         end
         for k = 1:size(dest,1)
@@ -541,10 +545,10 @@ function statistics(s::Specification, flag="train")
 
 
     temp = zeros(BigFloat, spectrum_size, length(spectrum_list))
-    for i in spectrum_list
+    for (j,i) in enumerate(spectrum_list)
         x = MAT.matread(i)
         for k = 1:spectrum_size
-            temp[k,i] = sum_kbn((view(x["spectrum"],k,:)-μ_spectrum[k]).^2)
+            temp[k,j] = sum_kbn((view(x["spectrum"],k,:)-μ_spectrum[k]).^2)
         end
     end
     for k = 1:spectrum_size
@@ -608,6 +612,8 @@ end
 
 
 function process_dataset(s::Specification, wav_dir::String, model_file::String, stat_file::String)
+# return: ratiomask_infer
+# side-effect: none
 
     stat = FORWARD.Stat{Float32}(stat_file)
     nn = FORWARD.NeuralNet_FC{Float32}(model_file)
@@ -616,8 +622,7 @@ function process_dataset(s::Specification, wav_dir::String, model_file::String, 
     for i in DATA.list(wav_dir, t=".wav")
         ratiomask_infer[i] = FORWARD.reconstruct(nn, stat, i, s.feature["frame_length"], s.feature["hop_length"], div(s.feature["context_frames"]-1,2), s.feature["nat_frames"])
     end
-    
-    nothing
+    return ratiomask_infer
 end
 
 

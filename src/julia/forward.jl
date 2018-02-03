@@ -15,14 +15,13 @@ struct Stat{T <: AbstractFloat}
 
     mu::Array{T,2}
     std::Array{T,2}
-    frames::Int64
 
     function Stat{T}(path::String) where T <: AbstractFloat
         stat = MAT.matread(path)
         mu_spectrum = T.(stat["mu_spectrum"])
         std_spectrum = T.(stat["std_spectrum"])
-        n_frames = stat["frames"]
-        new(mu_spectrum, std_spectrum, n_frames)
+        # n_frames = stat["frames"]
+        new(mu_spectrum, std_spectrum)
     end
 end
 
