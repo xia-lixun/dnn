@@ -8,10 +8,10 @@ import MAT
 import WAV
 import JSON
 
-
-include("feature.jl")
-include("forward.jl")
 include("data.jl")
+include("feature.jl")
+include("neural.jl")
+
 
 
 
@@ -440,6 +440,24 @@ end
 
 
 
+
+
+struct Mel{T <: AbstractFloat}
+
+    filter::Array{T,2}
+    filter_t::Array{T,2}
+    weight::Array{T,2}
+
+    function Mel{T}(s::Specification) where T <: AbstractFloat
+        filter = FEATURE.mel_filterbanks(T, s.sample_rate, s.feature["frame_length"], filt_num=s.feature["mel_bands"])
+        weight = sum(mel,2)
+        weight .= ones(T,size(weight)) ./ weight
+        new(filter, filter.', weight)
+    end
+end
+
+
+
 function feature(s::Specification, decomp_info; flag="train")
 # return: nothing
 # side-effect: write ||spectrum|| and ratiomask to flag/spectrum/*.mat files in float64
@@ -452,12 +470,7 @@ function feature(s::Specification, decomp_info; flag="train")
     rm(oracle_dir, force=true, recursive=true)
     mkpath(oracle_dir)
 
-    filterbank_fileapth = joinpath(s.root_mix, flag, "filterbank.mat")
-    rm(filterbank_fileapth, force=true)
-    
-    mel = FEATURE.mel_filterbanks(Float64, s.sample_rate, s.feature["frame_length"], filt_num=s.feature["mel_bands"])
-    mel_weight = sum(mel,2)
-    MAT.matwrite(filterbank_fileapth, Dict("mel"=>mel))
+    mel = Mel{Float64}(s)
 
     for i in keys(decomp_info)
 
@@ -482,21 +495,21 @@ function feature(s::Specification, decomp_info; flag="train")
         𝕏n, h = FEATURE.stft2(x_purenoise, s.feature["frame_length"], s.feature["hop_length"], FEATURE.sqrthann)
         
         ratiomask_dft_oracle = abs.(𝕏v) ./ (abs.(𝕏v) + abs.(𝕏n))
-        ratiomask_mel_oracle = (mel * ratiomask_dft_oracle) ./ mel_weight
+        ratiomask_mel_oracle = (mel.filter * ratiomask_dft_oracle) .* mel.weight
         magnitude_dft = abs.(𝕏m)
-        magnitude_mel = (mel * magnitude_dft) ./ mel_weight
+        magnitude_mel = (mel.filter * magnitude_dft) .* mel.weight
 
         MAT.matwrite(
             joinpath(spectrum_dir, basename(i[1:end-4]*".mat")), 
             Dict(
-                "ratiomask_dft"=>ratiomask_dft_oracle,
+                #"ratiomask_dft"=>ratiomask_dft_oracle,
                 "ratiomask_mel"=>ratiomask_mel_oracle, 
-                "spectrum_dft"=>magnitude_dft,
+                #"spectrum_dft"=>magnitude_dft,
                 "spectrum_mel"=>magnitude_mel)
         )
 
         # oracle performance
-        𝕏m .*= (mel.' * ratiomask_mel_oracle)
+        𝕏m .*= (mel.filter.' * ratiomask_mel_oracle)
         oracle = FEATURE.stft2(𝕏m, hm, s.feature["frame_length"], s.feature["hop_length"], FEATURE.sqrthann)
         WAV.wavwrite(2oracle, joinpath(oracle_dir,basename(i[1:end-4]*"_oracle.wav")), Fs=s.sample_rate)
     end
@@ -585,13 +598,14 @@ end
 struct Stat{T <: AbstractFloat}
 
     mu::Array{T,2}
-    std::Array{T,2}
+    std_rcp::Array{T,2}
 
     function Stat{T}(path::String) where T <: AbstractFloat
         stat = MAT.matread(path)
-        mu_spectrum = T.(stat["mu_spectrum"])
-        std_spectrum = T.(stat["std_spectrum"])
-        new(mu_spectrum, std_spectrum)
+        x = T.(stat["mu_spectrum"])
+        y = T.(stat["std_spectrum"])
+        y .= ones(T,size(y)) ./ y
+        new(x, y)
     end
 end
 
@@ -650,70 +664,74 @@ end
 
 
 function ratiomask_inference(
-    nn::NeuralNet{Float32}, 
-    stat::Stat{Float32}, 
-    x::AbstractArray{Float32,1}, 
-    nfft::Int64, 
-    nhop::Int64, 
-    radius::Int64, 
-    nat::Int64
-    )
-# ratiomask inference for time domain input
-    𝕏,h = FEATURE.stft2(x, nfft, nhop, FEATURE.sqrthann)
-    ratiomask = feed_forward(nn, FEATURE.sliding((abs.(𝕏).-stat.mu)./stat.std, radius, nat))
+    s::Specification,
+    nn::NEURAL.Net{T}, 
+    stat::Stat{T}, 
+    𝕏::Array{Complex{T},2}
+    ) where T <: AbstractFloat
+
+    # 𝕏,h = FEATURE.stft2(x, s.feature["frame_length"], s.feature["hop_length"], FEATURE.sqrthann)
+    mag_dft = abs.(𝕏)
+    mag_dft_norm = (mag_dft .- stat.mu) .* stat.std_rcp
+    mag_tensor = FEATURE.sliding(mag_dft_norm, div(s.feature["context_frames"]-1,2), s.feature["nat_frames"])
+    ratiomask = NEURAL.feedforward(nn, mag_tensor)
 end
 
 function ratiomask_inference(
     s::Specification, 
-    nn::FORWARD.NeuralNet{T}, 
+    nn::NEURAL.Net{T}, 
     stat::Stat{T},
-    mel::Array{T,2},
-    x::AbstractArray{T,1}
+    mel::Mel{T},
+    𝕏::Array{Complex{T},2}
     ) where T <: AbstractFloat
 
-    𝕏,h = FEATURE.stft2(x, s.feature["frame_length"], s.feature["hop_length"], FEATURE.sqrthann)
-    spectrum_normalized = (abs.(𝕏).-stat.mu)./stat.std
-    spectrum_tensor = FEATURE.sliding(spectrum_normalized, div(s.feature["context_frames"]-1,2), s.feature["nat_frames"])
-    ratiomask = FORWARD.feedforward(nn, spectrum_tensor)
+    # 𝕏,h = FEATURE.stft2(x, s.feature["frame_length"], s.feature["hop_length"], FEATURE.sqrthann)
+    mag_mel = (mel.filter * abs.(𝕏)) .* mel.weight
+    mag_mel_norm = (mag_mel .- stat.mu) .* stat.std_rcp
+    mag_tensor = FEATURE.sliding(mag_mel_norm, div(s.feature["context_frames"]-1,2), s.feature["nat_frames"])
+    ratiomask_mel = NEURAL.feedforward(nn, mag_tensor)
+    ratiomask = mel.filter_t * ratiomask_mel
 end
 
 
-
 function wavform_reconstruct(
-    nn::NeuralNet_FC{Float32}, 
+    s::Specification,
+    nn::NEURAL.Net{Float32}, 
     stat::Stat{Float32}, 
-    wav::String, 
-    nfft::Int64, 
-    nhop::Int64, 
-    radius::Int64, 
-    nat::Int64
+    mel::Mel{Float32},
+    wav::String
     )
 # return: ratiomask inference
 # side-effect: write processed wav side-by-side to the original
 
     x,sr = WAV.wavread(wav)
     x = Float32.(x) 
-
-    𝕏,h = FEATURE.stft2(view(x,:,1), nfft, nhop, FEATURE.sqrthann)
-    ratiomask = feed_forward(nn, FEATURE.sliding((abs.(𝕏).-stat.mu)./stat.std, radius, nat))
+    𝕏,h = FEATURE.stft2(view(x,:,1), s.feature["frame_length"], s.feature["hop_length"], FEATURE.sqrthann)
+    ratiomask = ratiomask_inference(s, nn, stat, mel, 𝕏)
     𝕏 .*= ratiomask
-    y = FEATURE.stft2(𝕏, h, nfft, nhop, FEATURE.sqrthann)
+    y = FEATURE.stft2(𝕏, h, s.feature["frame_length"], s.feature["hop_length"], FEATURE.sqrthann)
     WAV.wavwrite(2y, wav[1:end-4]*"_processed.wav", Fs=sr)
 
     return ratiomask
 end
 
 
-function process_dataset(s::Specification, wav_dir::String, model_file::String, stat_file::String)
+function process_dataset(
+    s::Specification, 
+    model_file::String, 
+    stat_file::String,
+    wav_dir::String
+    )
 # return: ratiomask_infer
 # side-effect: none
 
-    stat = FORWARD.Stat{Float32}(stat_file)
-    nn = FORWARD.NeuralNet_FC{Float32}(model_file)
-    
+    stat = Stat{Float32}(stat_file)
+    nn = NEURAL.Net{Float32}(model_file)
+    mel = Mel{Float32}(s)
+
     ratiomask_infer = Dict{String, Array{Float32,2}}()
     for i in DATA.list(wav_dir, t=".wav")
-        ratiomask_infer[i] = FORWARD.reconstruct(nn, stat, i, s.feature["frame_length"], s.feature["hop_length"], div(s.feature["context_frames"]-1,2), s.feature["nat_frames"])
+        ratiomask_infer[i] = wavform_reconstruct(s, nn, stat, mel, i)
     end
     return ratiomask_infer
 end

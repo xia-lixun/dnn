@@ -1,16 +1,15 @@
-module FORWARD
+module NEURAL
 # forward propagate through the neural net
 # decomposition/reconstrauction of the data under validation and test
 
 
 import MAT
-import WAV
 include("feature.jl")
 
 
 
 
-struct NeuralNet{T <: AbstractFloat}
+struct Net{T <: AbstractFloat}
 
     layers::Int64
     weight::Array{Array{T,2},1}
@@ -19,7 +18,7 @@ struct NeuralNet{T <: AbstractFloat}
     width_hidden::Int64
     width_output::Int64
 
-    function NeuralNet{T}(path::String) where T <: AbstractFloat
+    function Net{T}(path::String) where T <: AbstractFloat
 
         nn = MAT.matread(path)
         layers = div(length(nn),2)
@@ -40,7 +39,7 @@ end
 
 
 
-function feedforward(nn::NeuralNet{T}, x::AbstractArray{T,2}) where T <: AbstractFloat
+function feedforward(nn::Net{T}, x::AbstractArray{T,2}) where T <: AbstractFloat
 # Propagate the input data matrix through neural net
 # x is column major, i.e. each column is an input vector 
 
