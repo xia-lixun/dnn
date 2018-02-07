@@ -1,21 +1,21 @@
 {
-    "root": "D:\\5-Workspace\\Mix",
-    "noise_depot": "D:\\5-Workspace\\GoogleAudioSet",
-    "voice_depot": "D:\\5-Workspace\\Voice\\",
+    "root_mix": "D:\\8-Workspace\\",
+    "root_noise": "D:\\oak\\GoogleAudioSet\\NoSpeech\\",
+    "root_speech": "D:\\oak\\VoiceJSON\\TIMIT",
 
-    "voice_noise_time_ratio": 0.6,
-    "split_ratio_for_training": 0.7,
+    "speech_noise_time_ratio": 0.6,
+    "train_test_split_ratio": 0.7,
 
-    "voice_level": [
+    "speech_level_db": [
         -22.0,
         -32.0,
         -42.0
     ],
 
-    "training_samples": 200,
-    "test_samples": 100,
+    "train_seconds": 1000.0,
+    "test_seconds": 1000.0,
     "sample_rate": 16000,
-    "seed": 42,
+    "random_seed": 42,
     "snr": [
         20.0,
         15.0,
@@ -26,93 +26,53 @@
     ],
 
     "feature": {
-        "nat_frames": 14,
         "frame_length": 512,
         "hop_length": 128,
-        "frame_context": 23
+        "context_frames": 23,
+        "nat_frames": 14,
+        "mel_bands": 73
     },
-    "tensor_partition_size(MB)": 1024,
 
-    "noise_categories": [
+    "noise_groups": [
         {
             "name": "Air conditioning",
-            "percent": 7.0,
+            "percent": 12.5,
             "type": "stationary"
         },
         {
             "name": "Aircraft",
-            "percent": 7.0,
+            "percent": 12.5,
             "type": "stationary"
         },
         {
             "name": "Ambulance (siren)",
-            "percent": 0.0,
+            "percent": 12.5,
             "type": "nonstationary"
-        },
-        {
-            "name": "Artillery fire",
-            "percent": 7.0,
-            "type": "nonstationary"
-        },
-        {
-            "name": "Bus",
-            "percent": 7.0,
-            "type": "stationary"
         },
         {
             "name": "Car",
-            "percent": 7.0,
+            "percent": 12.5,
             "type": "stationary"
         },
         {
-            "name": "Chainsaw",
-            "percent": 7.0,
+            "name": "Blender",
+            "percent": 12.5,
             "type": "stationary"
         },
         {
-            "name": "Computer keyboard",
-            "percent": 7.0,
-            "type": "impulsive"
-        },
-        {
-            "name": "Drill",
-            "percent": 7.0,
-            "type": "stationary"
-        },        
-        {
-            "name": "Explosion",
-            "percent": 7.0,
-            "type": "impulsive"
-        },
-        {
-            "name": "Hair dryer",
-            "percent": 7.0,
-            "type": "stationary"
-        },
-        {
-            "name": "Hammer",
-            "percent": 7.0,
-            "type": "stationary"
-        },
-        {
-            "name": "Jackhammer",
-            "percent": 7.0,
-            "type": "impulsive"
+            "name": "jackhammer",
+            "percent": 12.5,
+            "type": "nonstationary"
         },
         {
             "name": "Machine gun",
-            "percent": 7.0,
-            "type": "nonstationary"
+            "percent": 12.5,
+            "type": "impulsive"
         },
         {
-            "name": "Ringtone",
-            "percent": 0.0,
-            "type": "nonstationary"
-        },
-        {
-            "name": "Subway, metro, underground",
-            "percent": 9.0,
-            "type": "stationary"
+            "name": "Computer keyboard",
+            "percent": 12.5,
+            "type": "impulsive"
         }
     ]
 }
