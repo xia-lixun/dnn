@@ -450,7 +450,7 @@ struct Mel{T <: AbstractFloat}
 
     function Mel{T}(s::Specification) where T <: AbstractFloat
         filter = FEATURE.mel_filterbanks(T, s.sample_rate, s.feature["frame_length"], filt_num=s.feature["mel_bands"])
-        weight = sum(mel,2)
+        weight = sum(filter,2)
         weight .= ones(T,size(weight)) ./ weight
         new(filter, filter.', weight)
     end
