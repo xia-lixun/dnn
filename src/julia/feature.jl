@@ -317,7 +317,7 @@ end
 
 
 # calculate filter banks
-function filter_banks(T, rate::U, nfft::U; filt_num=26, fl=0, fh=div(rate,2)) where {U <: Integer}
+function mel_filterbanks(T, rate::U, nfft::U; filt_num=26, fl=0, fh=div(rate,2)) where {U <: Integer}
     
     fh > div(rate,2) && error("high frequency must be less than or equal to nyquist frequency!")
     
@@ -343,7 +343,8 @@ function filter_banks(T, rate::U, nfft::U; filt_num=26, fl=0, fh=div(rate,2)) wh
             𝔽[i,j+1] = T((𝕓[i+2] - j) / (𝕓[i+2] - 𝕓[i+1]))
         end
     end
-    𝔽
+    𝔽[isnan.(𝔽)] = zero(T)
+    return 𝔽
 end
 
 

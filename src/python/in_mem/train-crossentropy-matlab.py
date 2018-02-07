@@ -10,28 +10,29 @@ from sklearn.model_selection import train_test_split
 
 
 
-
 TRAIN_ROOT = '/home/coc/6-Workspace/train/'
 TEST_ROOT = '/home/coc/6-Workspace/test/'
-MATFILE = '/home/coc/6-Workspace/model-20180131.mat'
+MODEL_LOCATION = '/home/coc/6-Workspace/model-20180205.mat'
+
 
 
 # due to 11GB size limit of the GPU mem
 # divide the dataset to fit the size
 TEST_PARTITIONS = 2
 
-INPUT_DIM = (257+26)*24
-OUTPUT_DIM = 257
+INPUT_DIM = 73*24
+OUTPUT_DIM = 73
 HIDDEN_LAYER_WIDTH = 2048
 
-N_EPOCHS = 100
-BATCH_SIZE_INIT = 1000
-LEARN_RATE_INIT = 0.01
+
+N_EPOCHS = 50
+BATCH_SIZE_INIT = 128
+LEARN_RATE_INIT = 0.001
 DROPOUT_COEFF = 0.8
 L2_LOSS_COEFF = 0.00
 MOMENTUM_COEFF = 0.9
 
-RAND_SEED = 42
+RAND_SEED = 8713
 rng = np.random.RandomState(RAND_SEED)
 
 
@@ -39,6 +40,17 @@ rng = np.random.RandomState(RAND_SEED)
 ##########################
 ##         GRAPH        ##
 ##########################
+
+
+def loadmat_transpose(path):
+    temp = {}
+    f = h5py.File(path)
+    for k,v in f.items():
+        temp[k] = np.array(v)
+    return temp
+
+
+
 class Dense:
 
     def __init__(self, in_dim, out_dim, function=lambda x: x):
@@ -59,6 +71,12 @@ class Dense:
 
 
 
+keep_prob = tf.placeholder(tf.float32)
+lrate_p = tf.placeholder(tf.float32)
+mt_p = tf.placeholder(tf.float32)
+
+
+
 def f_props(layers, x):
     for i, layer in enumerate(layers):
         x = layer.f_prop(x)
@@ -67,22 +85,19 @@ def f_props(layers, x):
     return x
 
 
-
-
 layers = [
-    Dense(INPUT_DIM, HIDDEN_LAYER_WIDTH, tf.nn.sigmoid),
-    Dense(HIDDEN_LAYER_WIDTH, HIDDEN_LAYER_WIDTH, tf.nn.sigmoid),
-    Dense(HIDDEN_LAYER_WIDTH, HIDDEN_LAYER_WIDTH, tf.nn.sigmoid),
+    Dense(INPUT_DIM, HIDDEN_LAYER_WIDTH, tf.nn.relu),
+    Dense(HIDDEN_LAYER_WIDTH, HIDDEN_LAYER_WIDTH, tf.nn.relu),
+    Dense(HIDDEN_LAYER_WIDTH, HIDDEN_LAYER_WIDTH, tf.nn.relu),
     Dense(HIDDEN_LAYER_WIDTH, OUTPUT_DIM)
 ]
 
-keep_prob = tf.placeholder(tf.float32)
-x = tf.placeholder(tf.float32, [None, INPUT_DIM])
-t = tf.placeholder(tf.float32, [None, OUTPUT_DIM])
-y = f_props(layers, x)
 
-lrate_p = tf.placeholder(tf.float32)
-mt_p = tf.placeholder(tf.float32)
+x = tf.placeholder(tf.float32, [None, INPUT_DIM])
+y = f_props(layers, x)
+t = tf.placeholder(tf.float32, [None, OUTPUT_DIM])
+
+
 
 # cost = tf.reduce_mean(tf.reduce_sum((y - t)**2, 1))
 cost_op = (tf.reduce_mean(tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(labels=t, logits=y), 1)) + 
@@ -91,6 +106,9 @@ cost_op = (tf.reduce_mean(tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(
           (L2_LOSS_COEFF * tf.nn.l2_loss(layers[2].W)) +
           (L2_LOSS_COEFF * tf.nn.l2_loss(layers[3].W)))
 train_op = tf.train.MomentumOptimizer(learning_rate=lrate_p, momentum=mt_p).minimize(cost_op)
+
+
+
 
 # saver = tf.train.Saver()
 sess = tf.Session()
@@ -116,11 +134,14 @@ def dataset_dimension(path):
     label_width = 0
 
     for p in range(1, 1+n_parts):
-        temp = scio.loadmat(os.path.join(path, 't_' + str(p) + '.mat'))
-        spect_examples += temp['spec'].shape[0]
-        label_examples += temp['bm'].shape[0]
-        spect_width = temp['spec'].shape[1]
-        label_width = temp['bm'].shape[1]
+
+        # temp = scio.loadmat(os.path.join(path, 't_' + str(p) + '.mat'))
+        temp = loadmat_transpose(os.path.join(path, 't_' + str(p) + '.mat'))
+
+        spect_examples += temp['variable'].shape[0]
+        label_examples += temp['label'].shape[0]
+        spect_width = temp['variable'].shape[1]
+        label_width = temp['label'].shape[1]
         del temp
         print('populating: %d/%d' % (p, n_parts))
 
@@ -137,10 +158,13 @@ def dataset_load2mem(path):
     offset = 0
 
     for i in range(1, 1+n_parts):
-        temp = scio.loadmat(os.path.join(path, 't_' + str(i) + '.mat'))
-        instance = temp['spec'].shape[0]
-        spect[offset:offset+instance] = temp['spec']
-        label[offset:offset+instance] = temp['bm']
+        
+        #temp = scio.loadmat(os.path.join(path, 't_' + str(i) + '.mat'))
+        temp = loadmat_transpose(os.path.join(path, 't_' + str(i) + '.mat'))
+
+        instance = temp['variable'].shape[0]
+        spect[offset:offset+instance] = temp['variable']
+        label[offset:offset+instance] = temp['label']
         offset += instance
         del temp
         print('loading: %d/%d'%(i,n_parts))
@@ -191,17 +215,11 @@ def training():
         # exponential decay (simulated annealing) may converge to 'sharp' global minimum
         # which generalizes poorly. we use hybrid discrete noise scale falling here.
         # "Don't decay the learning rate, increase the batch size, Samuel L. Smith et al. Google Brain"
+        if epoch >= 10:
+            lbs = 1024
         if epoch >= 20:
-            lbs = 2000
-        if epoch >= 40:
-            lbs = 4000
-        if epoch >= 60:
-            lbs = 8000
-        if epoch >= 70:
-            lrate = 0.001
-        if epoch >= 80:
             lrate = 0.0001
-        if epoch >= 90:
+        if epoch >= 30:
             lrate = 0.00001
         
         time_start = time.time()
@@ -229,10 +247,10 @@ def training():
             save_dict['W4'] = sess.run(layers[3].W)
             save_dict['b4'] = sess.run(layers[3].b)
 
-            scio.savemat(MATFILE, save_dict)
+            scio.savemat(MODEL_LOCATION, save_dict)
             cost_opt = cost_val
             print('[epoch %d] model saved' % (epoch + 1))
-        print('----------------------------------------------------------------------')
+        
 
     del train_spect
     del train_label

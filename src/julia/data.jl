@@ -87,7 +87,7 @@ end
 # resample entire folder to another while maintain folder structure
 # 1. need ffmpeg installed as backend
 # 2. need sox install as resample engine
-function resample(path_i::String, path_o::String, target_fs; source_type=".wav")
+function resample(path_i::String, path_o::String, target_fs; source_type=".wav", mix_to_mono=false)
     
     a = list(path_i, t = source_type)
     n = length(a)
@@ -105,7 +105,11 @@ function resample(path_i::String, path_o::String, target_fs; source_type=".wav")
                 
         x, fs = WAV.wavread(p)
         assert(fs == typeof(fs)(target_fs))
-        WAV.wavwrite(mean(x,2), p, Fs=fs, nbits=32)
+        if mix_to_mono
+            WAV.wavwrite(mean(x,2), p, Fs=fs, nbits=32)
+        else
+            WAV.wavwrite(x, p, Fs=fs, nbits=32)
+        end
         u[i] = size(x, 1)
         println("$i/$n complete")
     end

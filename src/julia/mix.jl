@@ -452,6 +452,13 @@ function feature(s::Specification, decomp_info; flag="train")
     rm(oracle_dir, force=true, recursive=true)
     mkpath(oracle_dir)
 
+    filterbank_fileapth = joinpath(s.root_mix, flag, "filterbank.mat")
+    rm(filterbank_fileapth, force=true)
+    
+    mel = FEATURE.mel_filterbanks(Float64, s.sample_rate, s.feature["frame_length"], filt_num=s.feature["mel_bands"])
+    mel_weight = sum(mel,2)
+    MAT.matwrite(filterbank_fileapth, Dict("mel"=>mel))
+
     for i in keys(decomp_info)
 
         x_mix, sr = WAV.wavread(i)
@@ -465,11 +472,7 @@ function feature(s::Specification, decomp_info; flag="train")
 
         x_purevoice= zeros(size(x_mix))
         for k in decomp_info[i]["label"]
-            if k[2]-k[1]+1 == length(x_voice)
-                x_purevoice[k[1]:k[2]] = x_voice
-            else
-                cyclic_extend!(x_voice, view(x_purevoice,k[1]:k[2]))
-            end
+            cyclic_extend!(x_voice, view(x_purevoice,k[1]:k[2]))
         end
         x_purenoise = x_mix - x_purevoice + rand(size(x_mix)) * (10^(-120/20))
         # WAV.wavwrite(hcat(x_mix, x_purevoice, x_purenoise), i[1:end-length(".wav")]*"-decomp.wav",Fs=s.sample_rate)
@@ -477,16 +480,30 @@ function feature(s::Specification, decomp_info; flag="train")
         𝕏m, hm = FEATURE.stft2(x_mix, s.feature["frame_length"], s.feature["hop_length"], FEATURE.sqrthann)
         𝕏v, h = FEATURE.stft2(x_purevoice, s.feature["frame_length"], s.feature["hop_length"], FEATURE.sqrthann)
         𝕏n, h = FEATURE.stft2(x_purenoise, s.feature["frame_length"], s.feature["hop_length"], FEATURE.sqrthann)
-        ratiomask_oracle = abs.(𝕏v) ./ (abs.(𝕏v) + abs.(𝕏n))
-        MAT.matwrite(joinpath(spectrum_dir, basename(i[1:end-4]*".mat")), Dict("ratiomask"=>ratiomask_oracle, "spectrum"=>abs.(𝕏m)))
+        
+        ratiomask_dft_oracle = abs.(𝕏v) ./ (abs.(𝕏v) + abs.(𝕏n))
+        ratiomask_mel_oracle = (mel * ratiomask_dft_oracle) ./ mel_weight
+        magnitude_dft = abs.(𝕏m)
+        magnitude_mel = (mel * magnitude_dft) ./ mel_weight
+
+        MAT.matwrite(
+            joinpath(spectrum_dir, basename(i[1:end-4]*".mat")), 
+            Dict(
+                "ratiomask_dft"=>ratiomask_dft_oracle,
+                "ratiomask_mel"=>ratiomask_mel_oracle, 
+                "spectrum_dft"=>magnitude_dft,
+                "spectrum_mel"=>magnitude_mel)
+        )
 
         # oracle performance
-        𝕏m .*= ratiomask_oracle
+        𝕏m .*= (mel.' * ratiomask_mel_oracle)
         oracle = FEATURE.stft2(𝕏m, hm, s.feature["frame_length"], s.feature["hop_length"], FEATURE.sqrthann)
         WAV.wavwrite(2oracle, joinpath(oracle_dir,basename(i[1:end-4]*"_oracle.wav")), Fs=s.sample_rate)
     end
     nothing
 end
+
+
 
 
 
@@ -505,18 +522,17 @@ function statistics(s::Specification; flag = "train")
 
     for (k,i) in enumerate(spectrum_list)
         u = MAT.matread(i)
-        spectrum_frames += size(u["spectrum"],2)
-        ratiomask_frames += size(u["ratiomask"],2)
+        spectrum_frames += size(u["spectrum_mel"],2)
+        ratiomask_frames += size(u["ratiomask_mel"],2)
         if k == 1
-            spectrum_size = size(u["spectrum"],1)
-            ratiomask_size = size(u["ratiomask"],1)
+            spectrum_size = size(u["spectrum_mel"],1)
+            ratiomask_size = size(u["ratiomask_mel"],1)
         end
     end
-    println("spectrum_size = $(spectrum_size)")
-    println("spectrum_frames = $(spectrum_frames)")
-    println("ratiomask = $(ratiomask_size)")
-    println("ratiomask_frames = $(ratiomask_frames)")
+    println("spectrum size = ($(spectrum_size),$(spectrum_frames))")
+    println("ratiomask size = ($(ratiomask_size),$(ratiomask_frames))")
     assert(spectrum_frames == ratiomask_frames)
+    
     μ_spectrum = zeros(spectrum_size,1)
     σ_spectrum = zeros(spectrum_size,1)
     μ_ratiomask = zeros(ratiomask_size,1)
@@ -538,8 +554,8 @@ function statistics(s::Specification; flag = "train")
         nothing
     end
 
-    average!("spectrum", spectrum_frames, μ_spectrum)
-    average!("ratiomask", ratiomask_frames, μ_ratiomask)
+    average!("spectrum_mel", spectrum_frames, μ_spectrum)
+    average!("ratiomask_mel", ratiomask_frames, μ_ratiomask)
     println("global spectrum μ (dimentionless): $(mean(μ_spectrum))")
     println("global ratiomask μ (dimentionless): $(mean(μ_ratiomask))")
 
@@ -548,7 +564,7 @@ function statistics(s::Specification; flag = "train")
     for (j,i) in enumerate(spectrum_list)
         x = MAT.matread(i)
         for k = 1:spectrum_size
-            temp[k,j] = sum_kbn((view(x["spectrum"],k,:)-μ_spectrum[k]).^2)
+            temp[k,j] = sum_kbn((view(x["spectrum_mel"],k,:)-μ_spectrum[k]).^2)
         end
     end
     for k = 1:spectrum_size
@@ -566,6 +582,23 @@ function statistics(s::Specification; flag = "train")
 end
 
 
+struct Stat{T <: AbstractFloat}
+
+    mu::Array{T,2}
+    std::Array{T,2}
+
+    function Stat{T}(path::String) where T <: AbstractFloat
+        stat = MAT.matread(path)
+        mu_spectrum = T.(stat["mu_spectrum"])
+        std_spectrum = T.(stat["std_spectrum"])
+        new(mu_spectrum, std_spectrum)
+    end
+end
+
+
+
+
+
 
 
 function tensor(s::Specification; flag="train")
@@ -581,11 +614,12 @@ function tensor(s::Specification; flag="train")
         rm(i, force=true)
     end
     
-    for i in DATA.list(joinpath(s.root_mix, flag, "spectrum"), t=".mat")
+    spectrum_list = DATA.list(joinpath(s.root_mix, flag, "spectrum"), t=".mat")
+    for (k,i) in enumerate(spectrum_list)
         data = MAT.matread(i)
-        variable = Float32.(FEATURE.sliding((data["spectrum"].-stat["mu_spectrum"])./stat["std_spectrum"], div(s.feature["context_frames"]-1,2), s.feature["nat_frames"]))
-        label = Float32.(data["ratiomask"])
-        MAT.matwrite(joinpath(tensor_dir, basename(i[1:end-4])*".mat"), Dict("variable"=>transpose(variable), "label"=>transpose(label)))
+        variable = Float32.(FEATURE.sliding((data["spectrum_mel"].-stat["mu_spectrum"])./stat["std_spectrum"], div(s.feature["context_frames"]-1,2), s.feature["nat_frames"]))
+        label = Float32.(data["ratiomask_mel"])
+        MAT.matwrite(joinpath(tensor_dir, "t_$k.mat"), Dict("variable"=>variable, "label"=>label))  # basename(i[1:end-4])
     end
     nothing
 end
@@ -609,6 +643,65 @@ function build(path_specification)
 end
 
 
+
+
+
+
+
+
+function ratiomask_inference(
+    nn::NeuralNet{Float32}, 
+    stat::Stat{Float32}, 
+    x::AbstractArray{Float32,1}, 
+    nfft::Int64, 
+    nhop::Int64, 
+    radius::Int64, 
+    nat::Int64
+    )
+# ratiomask inference for time domain input
+    𝕏,h = FEATURE.stft2(x, nfft, nhop, FEATURE.sqrthann)
+    ratiomask = feed_forward(nn, FEATURE.sliding((abs.(𝕏).-stat.mu)./stat.std, radius, nat))
+end
+
+function ratiomask_inference(
+    s::Specification, 
+    nn::FORWARD.NeuralNet{T}, 
+    stat::Stat{T},
+    mel::Array{T,2},
+    x::AbstractArray{T,1}
+    ) where T <: AbstractFloat
+
+    𝕏,h = FEATURE.stft2(x, s.feature["frame_length"], s.feature["hop_length"], FEATURE.sqrthann)
+    spectrum_normalized = (abs.(𝕏).-stat.mu)./stat.std
+    spectrum_tensor = FEATURE.sliding(spectrum_normalized, div(s.feature["context_frames"]-1,2), s.feature["nat_frames"])
+    ratiomask = FORWARD.feedforward(nn, spectrum_tensor)
+end
+
+
+
+function wavform_reconstruct(
+    nn::NeuralNet_FC{Float32}, 
+    stat::Stat{Float32}, 
+    wav::String, 
+    nfft::Int64, 
+    nhop::Int64, 
+    radius::Int64, 
+    nat::Int64
+    )
+# return: ratiomask inference
+# side-effect: write processed wav side-by-side to the original
+
+    x,sr = WAV.wavread(wav)
+    x = Float32.(x) 
+
+    𝕏,h = FEATURE.stft2(view(x,:,1), nfft, nhop, FEATURE.sqrthann)
+    ratiomask = feed_forward(nn, FEATURE.sliding((abs.(𝕏).-stat.mu)./stat.std, radius, nat))
+    𝕏 .*= ratiomask
+    y = FEATURE.stft2(𝕏, h, nfft, nhop, FEATURE.sqrthann)
+    WAV.wavwrite(2y, wav[1:end-4]*"_processed.wav", Fs=sr)
+
+    return ratiomask
+end
 
 
 function process_dataset(s::Specification, wav_dir::String, model_file::String, stat_file::String)

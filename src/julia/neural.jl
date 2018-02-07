@@ -10,24 +10,7 @@ include("feature.jl")
 
 
 
-
-struct Stat{T <: AbstractFloat}
-
-    mu::Array{T,2}
-    std::Array{T,2}
-
-    function Stat{T}(path::String) where T <: AbstractFloat
-        stat = MAT.matread(path)
-        mu_spectrum = T.(stat["mu_spectrum"])
-        std_spectrum = T.(stat["std_spectrum"])
-        # n_frames = stat["frames"]
-        new(mu_spectrum, std_spectrum)
-    end
-end
-
-
-
-struct NeuralNet_FC{T <: AbstractFloat}
+struct NeuralNet{T <: AbstractFloat}
 
     layers::Int64
     weight::Array{Array{T,2},1}
@@ -36,7 +19,7 @@ struct NeuralNet_FC{T <: AbstractFloat}
     width_hidden::Int64
     width_output::Int64
 
-    function NeuralNet_FC{T}(path::String) where T <: AbstractFloat
+    function NeuralNet{T}(path::String) where T <: AbstractFloat
 
         nn = MAT.matread(path)
         layers = div(length(nn),2)
@@ -57,7 +40,7 @@ end
 
 
 
-function feed_forward(nn::NeuralNet_FC{T}, x::AbstractArray{T,2}) where T <: AbstractFloat
+function feedforward(nn::NeuralNet{T}, x::AbstractArray{T,2}) where T <: AbstractFloat
 # Propagate the input data matrix through neural net
 # x is column major, i.e. each column is an input vector 
 
@@ -69,39 +52,6 @@ function feed_forward(nn::NeuralNet_FC{T}, x::AbstractArray{T,2}) where T <: Abs
 end
 
 
-
-
-function ratiomask_inference(nn::NeuralNet_FC{T}, stat::Stat{T}, 𝕏::AbstractArray{Complex{T},2}, radius::Int64, nat::Int64) where T <: AbstractFloat
-# Ratiomask inference for complex spectrum input
-    ratiomask = feed_forward(nn, FEATURE.sliding((abs.(𝕏).-stat.mu)./stat.std, radius, nat))
-end
-
-
-function ratiomask_inference(nn::NeuralNet_FC{Float32}, stat::Stat{Float32}, x::AbstractArray{Float32,1}, nfft::Int64, nhop::Int64, radius::Int64, nat::Int64)
-# ratiomask inference for time domain input
-    𝕏,h = FEATURE.stft2(x, nfft, nhop, FEATURE.sqrthann)
-    ratiomask = ratiomask_inference(nn, stat, 𝕏, radius, nat)
-end
-
-
-
-
-function reconstruct(nn::NeuralNet_FC{Float32}, stat::Stat{Float32}, wav::String, nfft::Int64, nhop::Int64, radius::Int64, nat::Int64)
-# return: ratiomask inference
-# side-effect: write processed wav side-by-side to the original
-
-    x,sr = WAV.wavread(wav)
-    x = Float32.(x) 
-
-    𝕏,h = FEATURE.stft2(view(x,:,1), nfft, nhop, FEATURE.sqrthann)
-    ratiomask_estimate = ratiomask_inference(nn, stat, 𝕏, radius, nat)
-
-    𝕏 .*= ratiomask_estimate
-    y = FEATURE.stft2(𝕏, h, nfft, nhop, FEATURE.sqrthann)
-    WAV.wavwrite(2y, wav[1:end-4]*"_processed.wav", Fs=sr)
-
-    return ratiomask_estimate
-end
 
 
 
