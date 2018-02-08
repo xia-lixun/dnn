@@ -343,8 +343,8 @@ function mel_filterbanks(T, rate::U, nfft::U; filt_num=26, fl=0, fh=div(rate,2))
             𝔽[i,j+1] = T((𝕓[i+2] - j) / (𝕓[i+2] - 𝕓[i+1]))
         end
     end
-    𝔽[isnan.(𝔽)] = zero(T)
-    return 𝔽
+    𝔽m = 𝔽[vec(!isnan(sum(𝔽,2))),:]
+    return 𝔽m
 end
 
 

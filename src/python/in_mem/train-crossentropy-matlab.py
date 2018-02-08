@@ -9,31 +9,36 @@ from sklearn.model_selection import train_test_split
 
 
 
+def loadmat_transpose(path):
+    temp = {}
+    f = h5py.File(path)
+    for k,v in f.items():
+        temp[k] = np.array(v)
+    return temp
 
-TRAIN_ROOT = '/home/coc/6-Workspace/train/'
-TEST_ROOT = '/home/coc/6-Workspace/test/'
-MODEL_LOCATION = '/home/coc/6-Workspace/model-20180205.mat'
 
 
 
-# due to 11GB size limit of the GPU mem
-# divide the dataset to fit the size
-TEST_PARTITIONS = 2
+TRAIN_ROOT = '/home/coc/workspace/train/'
+TEST_ROOT = '/home/coc/workspace/test/'
+MODEL_LOCATION = '/home/coc/workspace/model-20180208.mat'
 
-INPUT_DIM = 73*24
-OUTPUT_DIM = 73
+
+tensor = loadmat_transpose(os.path.join(TRAIN_ROOT, 't_1.mat'))
+INPUT_DIM = tensor['variable'].shape[1]
+OUTPUT_DIM = tensor['label'].shape[1]
+print('input/output dims = %d,%d' % (INPUT_DIM, OUTPUT_DIM))
+
+
+TEST_PARTITIONS = 2          # divide the dataset to fit 11GB limit of GPU mem
 HIDDEN_LAYER_WIDTH = 2048
-
-
 N_EPOCHS = 50
 BATCH_SIZE_INIT = 128
-LEARN_RATE_INIT = 0.001
+LEARN_RATE_INIT = 0.01
 DROPOUT_COEFF = 0.8
 L2_LOSS_COEFF = 0.00
 MOMENTUM_COEFF = 0.9
-
-RAND_SEED = 8713
-rng = np.random.RandomState(RAND_SEED)
+rng = np.random.RandomState(4913)
 
 
 
@@ -42,12 +47,6 @@ rng = np.random.RandomState(RAND_SEED)
 ##########################
 
 
-def loadmat_transpose(path):
-    temp = {}
-    f = h5py.File(path)
-    for k,v in f.items():
-        temp[k] = np.array(v)
-    return temp
 
 
 
@@ -86,9 +85,9 @@ def f_props(layers, x):
 
 
 layers = [
-    Dense(INPUT_DIM, HIDDEN_LAYER_WIDTH, tf.nn.relu),
-    Dense(HIDDEN_LAYER_WIDTH, HIDDEN_LAYER_WIDTH, tf.nn.relu),
-    Dense(HIDDEN_LAYER_WIDTH, HIDDEN_LAYER_WIDTH, tf.nn.relu),
+    Dense(INPUT_DIM, HIDDEN_LAYER_WIDTH, tf.nn.sigmoid),
+    Dense(HIDDEN_LAYER_WIDTH, HIDDEN_LAYER_WIDTH, tf.nn.sigmoid),
+    Dense(HIDDEN_LAYER_WIDTH, HIDDEN_LAYER_WIDTH, tf.nn.sigmoid),
     Dense(HIDDEN_LAYER_WIDTH, OUTPUT_DIM)
 ]
 
@@ -100,11 +99,11 @@ t = tf.placeholder(tf.float32, [None, OUTPUT_DIM])
 
 
 # cost = tf.reduce_mean(tf.reduce_sum((y - t)**2, 1))
-cost_op = (tf.reduce_mean(tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(labels=t, logits=y), 1)) + 
-          (L2_LOSS_COEFF * tf.nn.l2_loss(layers[0].W)) +
-          (L2_LOSS_COEFF * tf.nn.l2_loss(layers[1].W)) +
-          (L2_LOSS_COEFF * tf.nn.l2_loss(layers[2].W)) +
-          (L2_LOSS_COEFF * tf.nn.l2_loss(layers[3].W)))
+cost_op = (tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=t, logits=y))+
+          L2_LOSS_COEFF * tf.nn.l2_loss(layers[0].W)+
+          L2_LOSS_COEFF * tf.nn.l2_loss(layers[1].W)+
+          L2_LOSS_COEFF * tf.nn.l2_loss(layers[2].W)+
+          L2_LOSS_COEFF * tf.nn.l2_loss(layers[3].W))
 train_op = tf.train.MomentumOptimizer(learning_rate=lrate_p, momentum=mt_p).minimize(cost_op)
 
 
@@ -215,13 +214,15 @@ def training():
         # exponential decay (simulated annealing) may converge to 'sharp' global minimum
         # which generalizes poorly. we use hybrid discrete noise scale falling here.
         # "Don't decay the learning rate, increase the batch size, Samuel L. Smith et al. Google Brain"
-        if epoch >= 10:
-            lbs = 1024
+        #if epoch >= 20:
+            #lbs = 1024
         if epoch >= 20:
-            lrate = 0.0001
+            lrate = 0.001
         if epoch >= 30:
+            lrate = 0.0001
+        if epoch >= 40:
             lrate = 0.00001
-        
+
         time_start = time.time()
         train_spect, train_label = shuffle(train_spect, train_label)
         n_batch = train_label.shape[0] // lbs

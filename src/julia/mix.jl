@@ -451,7 +451,7 @@ struct Mel{T <: AbstractFloat}
     function Mel{T}(s::Specification) where T <: AbstractFloat
         filter = FEATURE.mel_filterbanks(T, s.sample_rate, s.feature["frame_length"], filt_num=s.feature["mel_bands"])
         weight = sum(filter,2)
-        weight .= ones(T,size(weight)) ./ weight
+        weight .= ones(T,size(weight)) ./ (weight .+ eps(T))
         new(filter, filter.', weight)
     end
 end
@@ -502,9 +502,9 @@ function feature(s::Specification, decomp_info; flag="train")
         MAT.matwrite(
             joinpath(spectrum_dir, basename(i[1:end-4]*".mat")), 
             Dict(
-                #"ratiomask_dft"=>ratiomask_dft_oracle,
+                "ratiomask_dft"=>ratiomask_dft_oracle,
                 "ratiomask_mel"=>ratiomask_mel_oracle, 
-                #"spectrum_dft"=>magnitude_dft,
+                "spectrum_dft"=>magnitude_dft,
                 "spectrum_mel"=>magnitude_mel)
         )
 
@@ -604,7 +604,7 @@ struct Stat{T <: AbstractFloat}
         stat = MAT.matread(path)
         x = T.(stat["mu_spectrum"])
         y = T.(stat["std_spectrum"])
-        y .= ones(T,size(y)) ./ y
+        y .= ones(T,size(y)) ./ (y .+ eps(T))
         new(x, y)
     end
 end
@@ -717,14 +717,14 @@ end
 
 
 function process_dataset(
-    s::Specification, 
+    specification_file::String, 
     model_file::String, 
     stat_file::String,
     wav_dir::String
     )
 # return: ratiomask_infer
 # side-effect: none
-
+    s = Specification(specification_file)
     stat = Stat{Float32}(stat_file)
     nn = NEURAL.Net{Float32}(model_file)
     mel = Mel{Float32}(s)
