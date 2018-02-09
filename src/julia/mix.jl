@@ -775,6 +775,7 @@ function process_dataset(
         assert(typeof(s.sample_rate)(sr) == s.sample_rate)
         y,ratiomask_infer[i] = wavform_reconstruct(s, nn, mel, view(Float32.(x),:,1))
         WAV.wavwrite(y, joinpath(dir_out, basename(i)), Fs=s.sample_rate)
+        info("$i OK")
     end
     return ratiomask_infer
 end

@@ -344,7 +344,7 @@ function mel_filterbanks(T, rate::U, nfft::U; filt_num=26, fl=0, fh=div(rate,2))
             𝔽[i,j+1] = T((𝕓[i+2] - j) / (𝕓[i+2] - 𝕓[i+1]))
         end
     end
-    𝔽m = 𝔽[vec(!isnan.(sum(𝔽,2))),:]
+    𝔽m = 𝔽[vec(.!(isnan.(sum(𝔽,2)))),:]
     return 𝔽m
 end
 
@@ -518,7 +518,8 @@ function extract_symbol_and_merge(
 
     ℝ = xcorr(s, x)
     info("peak value: $(maximum(ℝ))")                              
-    box = plot(x, size=(800,200))
+    vision && (box = plot(x, size=(800,200)))
+    
     𝓡 = sort(ℝ[local_maxima(ℝ)], rev = true)
     isempty(𝓡) && ( return (y, diff(peaks)) )
 
