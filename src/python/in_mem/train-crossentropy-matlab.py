@@ -21,7 +21,7 @@ def loadmat_transpose(path):
 
 TRAIN_ROOT = '/home/coc/workspace/train/'
 TEST_ROOT = '/home/coc/workspace/test/'
-MODEL_LOCATION = '/home/coc/workspace/model-20180208.mat'
+MODEL_LOCATION = '/home/coc/workspace/model-20180209.mat'
 
 
 tensor = loadmat_transpose(os.path.join(TRAIN_ROOT, 't_1.mat'))
@@ -214,14 +214,10 @@ def training():
         # exponential decay (simulated annealing) may converge to 'sharp' global minimum
         # which generalizes poorly. we use hybrid discrete noise scale falling here.
         # "Don't decay the learning rate, increase the batch size, Samuel L. Smith et al. Google Brain"
-        #if epoch >= 20:
-            #lbs = 1024
-        if epoch >= 20:
-            lrate = 0.001
-        if epoch >= 30:
-            lrate = 0.0001
-        if epoch >= 40:
-            lrate = 0.00001
+        #if epoch >= 30:
+        #    lrate = 0.001
+        #if epoch >= 40:
+        #    lrate = 0.0001
 
         time_start = time.time()
         train_spect, train_label = shuffle(train_spect, train_label)

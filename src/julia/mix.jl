@@ -16,6 +16,7 @@ include("neural.jl")
 
 
 
+
 struct Specification
 
     seed::Int64    
@@ -241,8 +242,8 @@ end
 
 
 function wavgen(s::Specification, data::Layout; flag="train")
-# return: information that reconstructs source components
-# side-effect: write mixed wav files to /flag/wav/*.wav
+    # return: information that reconstructs source components
+    # side-effect: write mixed wav files to /flag/wav/*.wav
 
     gain = Dict{String, Array{Float64,1}}()
     label = Dict{String, Array{Tuple{Int64, Int64},1}}()
@@ -406,9 +407,9 @@ end
 
 
 function mix(s::Specification)
-# return: data layout as information of the original components
-#         mixture information of the training and test dataset
-# side-effect: same as wavgen()
+    # return: data layout as information of the original components
+    #         mixture information of the training and test dataset
+    # side-effect: same as wavgen()
 
     srand(s.seed)
     !isdir(s.root_noise) && error("noise depot doesn't exist")
@@ -459,16 +460,20 @@ end
 
 
 function feature(s::Specification, decomp_info; flag="train")
-# return: nothing
-# side-effect: write ||spectrum|| and ratiomask to flag/spectrum/*.mat files in float64
+    # return: nothing
+    # side-effect: write ||spectrum|| and ratiomask to flag/spectrum/*.mat files in float64
 
-    spectrum_dir = joinpath(s.root_mix, flag, "spectrum")
-    rm(spectrum_dir, force=true, recursive=true)
-    mkpath(spectrum_dir)
+    function build_subdir(content)
+        subdir = joinpath(s.root_mix, flag, content...)
+        rm(subdir, force=true, recursive=true)
+        mkpath(subdir)
+        return subdir    
+    end
+    spectrum_dir = build_subdir(("spectrum",))
+    oracle_mel_dir = build_subdir(("oracle", "mel"))
+    oracle_dft_dir = build_subdir(("oracle", "dft"))
+    decomp_dir = build_subdir(("decomposition",))
 
-    oracle_dir = joinpath(s.root_mix, flag, "oracle")
-    rm(oracle_dir, force=true, recursive=true)
-    mkpath(oracle_dir)
 
     mel = Mel{Float64}(s)
 
@@ -488,7 +493,7 @@ function feature(s::Specification, decomp_info; flag="train")
             cyclic_extend!(x_voice, view(x_purevoice,k[1]:k[2]))
         end
         x_purenoise = x_mix - x_purevoice + rand(size(x_mix)) * (10^(-120/20))
-        # WAV.wavwrite(hcat(x_mix, x_purevoice, x_purenoise), i[1:end-length(".wav")]*"-decomp.wav",Fs=s.sample_rate)
+        WAV.wavwrite(hcat(x_purevoice, x_purenoise), joinpath(decomp_dir, basename(i)),Fs=s.sample_rate)
 
         𝕏m, hm = FEATURE.stft2(x_mix, s.feature["frame_length"], s.feature["hop_length"], FEATURE.sqrthann)
         𝕏v, h = FEATURE.stft2(x_purevoice, s.feature["frame_length"], s.feature["hop_length"], FEATURE.sqrthann)
@@ -497,7 +502,8 @@ function feature(s::Specification, decomp_info; flag="train")
         ratiomask_dft_oracle = abs.(𝕏v) ./ (abs.(𝕏v) + abs.(𝕏n))
         ratiomask_mel_oracle = (mel.filter * ratiomask_dft_oracle) .* mel.weight
         magnitude_dft = abs.(𝕏m)
-        magnitude_mel = (mel.filter * magnitude_dft) .* mel.weight
+        # magnitude_mel = (mel.filter * magnitude_dft) .* mel.weight
+        magnitude_mel = log.(mel.filter * magnitude_dft + eps())
 
         MAT.matwrite(
             joinpath(spectrum_dir, basename(i[1:end-4]*".mat")), 
@@ -509,9 +515,21 @@ function feature(s::Specification, decomp_info; flag="train")
         )
 
         # oracle performance
-        𝕏m .*= (mel.filter.' * ratiomask_mel_oracle)
-        oracle = FEATURE.stft2(𝕏m, hm, s.feature["frame_length"], s.feature["hop_length"], FEATURE.sqrthann)
-        WAV.wavwrite(2oracle, joinpath(oracle_dir,basename(i[1:end-4]*"_oracle.wav")), Fs=s.sample_rate)
+        oracle_mel = FEATURE.stft2(
+            𝕏m .* (mel.filter.' * ratiomask_mel_oracle), 
+            hm, 
+            s.feature["frame_length"], 
+            s.feature["hop_length"], 
+            FEATURE.sqrthann)
+        WAV.wavwrite(2oracle_mel, joinpath(oracle_mel_dir,basename(i)), Fs=s.sample_rate)
+
+        oracle_dft = FEATURE.stft2(
+            𝕏m .* ratiomask_dft_oracle,
+            hm, 
+            s.feature["frame_length"], 
+            s.feature["hop_length"], 
+            FEATURE.sqrthann)
+        WAV.wavwrite(2oracle_dft, joinpath(oracle_dft_dir,basename(i)), Fs=s.sample_rate)
     end
     nothing
 end
@@ -522,8 +540,8 @@ end
 
 
 function statistics(s::Specification; flag = "train")
-# return: dictionary ["mu_spectrum"],["std_spectrum"],["mu_ratiomask"],["frames"]
-# side-effect: write dictionary aforementioned to /flag/statistics.mat
+    # return: dictionary ["mu_spectrum"],["std_spectrum"],["mu_ratiomask"],["frames"]
+    # side-effect: write dictionary aforementioned to /flag/statistics.mat
 
     spectrum_list = DATA.list(joinpath(s.root_mix, flag, "spectrum"), t=".mat")
 
@@ -616,10 +634,8 @@ end
 
 
 function tensor(s::Specification; flag="train")
-# return: nothing
-# side-effect: write tensors to /flag/tensor/*.mat
-
-    stat = MAT.matread(joinpath(s.root_mix, flag, "statistics.mat"))
+    # return: nothing
+    # side-effect: write tensors to /flag/tensor/*.mat
 
     tensor_dir = joinpath(s.root_mix, flag, "tensor")
     mkpath(tensor_dir)
@@ -631,9 +647,9 @@ function tensor(s::Specification; flag="train")
     spectrum_list = DATA.list(joinpath(s.root_mix, flag, "spectrum"), t=".mat")
     for (k,i) in enumerate(spectrum_list)
         data = MAT.matread(i)
-        variable = Float32.(FEATURE.sliding((data["spectrum_mel"].-stat["mu_spectrum"])./stat["std_spectrum"], div(s.feature["context_frames"]-1,2), s.feature["nat_frames"]))
+        variable = Float32.(FEATURE.sliding(data["spectrum_mel"], div(s.feature["context_frames"]-1,2), s.feature["nat_frames"]))
         label = Float32.(data["ratiomask_mel"])
-        MAT.matwrite(joinpath(tensor_dir, "t_$k.mat"), Dict("variable"=>variable, "label"=>label))  # basename(i[1:end-4])
+        MAT.matwrite(joinpath(tensor_dir, "t_$k.mat"), Dict("variable"=>variable, "label"=>label))
     end
     nothing
 end
@@ -642,7 +658,7 @@ end
 
 
 function build(path_specification)
-# This is the main function to generate tensors for training
+    # This is the main function to generate tensors for training
 
     s = Specification(path_specification)
     data, info_train, info_test = mix(s)
@@ -653,8 +669,39 @@ function build(path_specification)
     tensor(s)
     tensor(s, flag="test")
 
-    return (data, info_train, info_test, stat_train, stat_test)
+    sdr_oracle_dft = sdr_benchmark(joinpath(s.root_mix, "test", "decomposition"), joinpath(s.root_mix, "test", "oracle", "dft"))
+    sdr_oracle_mel = sdr_benchmark(joinpath(s.root_mix, "test", "decomposition"), joinpath(s.root_mix, "test", "oracle", "mel"))
+
+    # return (data, info_train, info_test)
+    return (sdr_oracle_dft, sdr_oracle_mel)
 end
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -666,29 +713,24 @@ end
 function ratiomask_inference(
     s::Specification,
     nn::NEURAL.Net{T}, 
-    stat::Stat{T}, 
     𝕏::Array{Complex{T},2}
     ) where T <: AbstractFloat
 
-    # 𝕏,h = FEATURE.stft2(x, s.feature["frame_length"], s.feature["hop_length"], FEATURE.sqrthann)
-    mag_dft = abs.(𝕏)
-    mag_dft_norm = (mag_dft .- stat.mu) .* stat.std_rcp
-    mag_tensor = FEATURE.sliding(mag_dft_norm, div(s.feature["context_frames"]-1,2), s.feature["nat_frames"])
+    mag_dft = log.(abs.(𝕏) + eps(T))
+    mag_tensor = FEATURE.sliding(mag_dft, div(s.feature["context_frames"]-1,2), s.feature["nat_frames"])
     ratiomask = NEURAL.feedforward(nn, mag_tensor)
 end
 
+
 function ratiomask_inference(
     s::Specification, 
-    nn::NEURAL.Net{T}, 
-    stat::Stat{T},
+    nn::NEURAL.Net{T},
     mel::Mel{T},
     𝕏::Array{Complex{T},2}
     ) where T <: AbstractFloat
 
-    # 𝕏,h = FEATURE.stft2(x, s.feature["frame_length"], s.feature["hop_length"], FEATURE.sqrthann)
-    mag_mel = (mel.filter * abs.(𝕏)) .* mel.weight
-    mag_mel_norm = (mag_mel .- stat.mu) .* stat.std_rcp
-    mag_tensor = FEATURE.sliding(mag_mel_norm, div(s.feature["context_frames"]-1,2), s.feature["nat_frames"])
+    mag_mel = log.(mel.filter * abs.(𝕏) + eps(T))
+    mag_tensor = FEATURE.sliding(mag_mel, div(s.feature["context_frames"]-1,2), s.feature["nat_frames"])
     ratiomask_mel = NEURAL.feedforward(nn, mag_tensor)
     ratiomask = mel.filter_t * ratiomask_mel
 end
@@ -696,47 +738,68 @@ end
 
 function wavform_reconstruct(
     s::Specification,
-    nn::NEURAL.Net{Float32}, 
-    stat::Stat{Float32}, 
+    nn::NEURAL.Net{Float32},
     mel::Mel{Float32},
-    wav::String
+    x::AbstractArray{Float32,1}
     )
-# return: ratiomask inference
-# side-effect: write processed wav side-by-side to the original
+    # return: ratiomask inference
+    # side-effect: write processed wav side-by-side to the original
 
-    x,sr = WAV.wavread(wav)
-    x = Float32.(x) 
-    𝕏,h = FEATURE.stft2(view(x,:,1), s.feature["frame_length"], s.feature["hop_length"], FEATURE.sqrthann)
-    ratiomask = ratiomask_inference(s, nn, stat, mel, 𝕏)
+    𝕏,h = FEATURE.stft2(x, s.feature["frame_length"], s.feature["hop_length"], FEATURE.sqrthann)
+    ratiomask = ratiomask_inference(s, nn, mel, 𝕏)
     𝕏 .*= ratiomask
     y = FEATURE.stft2(𝕏, h, s.feature["frame_length"], s.feature["hop_length"], FEATURE.sqrthann)
-    WAV.wavwrite(2y, wav[1:end-4]*"_processed.wav", Fs=sr)
-
-    return ratiomask
+    return (2y,ratiomask)
 end
 
 
 function process_dataset(
     specification_file::String, 
-    model_file::String, 
-    stat_file::String,
+    model_file::String,
     wav_dir::String
     )
-# return: ratiomask_infer
-# side-effect: none
+    # return: ratiomask_infer
+    # side-effect: write processed wav files to wav_dir/processed/
+
     s = Specification(specification_file)
-    stat = Stat{Float32}(stat_file)
     nn = NEURAL.Net{Float32}(model_file)
     mel = Mel{Float32}(s)
 
+    dir_out = joinpath(wav_dir, "processed")
+    rm(dir_out, force=true, recursive=true)
+    mkpath(dir_out)
+
     ratiomask_infer = Dict{String, Array{Float32,2}}()
     for i in DATA.list(wav_dir, t=".wav")
-        ratiomask_infer[i] = wavform_reconstruct(s, nn, stat, mel, i)
+        x,sr = WAV.wavread(i)
+        assert(typeof(s.sample_rate)(sr) == s.sample_rate)
+        y,ratiomask_infer[i] = wavform_reconstruct(s, nn, mel, view(Float32.(x),:,1))
+        WAV.wavwrite(y, joinpath(dir_out, basename(i)), Fs=s.sample_rate)
     end
     return ratiomask_infer
 end
 
 
+
+
+
+
+
+
+function sdr_benchmark(reference_dir::String, evaluation_dir::String)
+    # file names must be identical in both folders
+    # evaluation dir may contain a subset of the reference
+    sdr = zeros(1,1)
+    items = DATA.list(evaluation_dir, t=".wav")
+
+    for i in items
+        t,sr = WAV.wavread(joinpath(reference_dir, basename(i)))
+        x,sr = WAV.wavread(i)
+        println(i)
+        sdr += FEATURE.signal_to_distortion_ratio(view(x,:,1), view(t,:,1))
+    end
+    return sdr/length(items)
+end
 
 
 
@@ -771,6 +834,38 @@ end
 
 # module
 end
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

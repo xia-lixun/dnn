@@ -2,6 +2,7 @@ module FEATURE
 
 
 using Polynomials
+using Plots
 
 
 # bilinear transformation of transfer function from s-domain to z-domain
@@ -343,7 +344,7 @@ function mel_filterbanks(T, rate::U, nfft::U; filt_num=26, fl=0, fh=div(rate,2))
             𝔽[i,j+1] = T((𝕓[i+2] - j) / (𝕓[i+2] - 𝕓[i+1]))
         end
     end
-    𝔽m = 𝔽[vec(!isnan(sum(𝔽,2))),:]
+    𝔽m = 𝔽[vec(!isnan.(sum(𝔽,2))),:]
     return 𝔽m
 end
 
@@ -497,6 +498,92 @@ end
 
 
 
+
+
+
+
+
+
+function extract_symbol_and_merge(
+    x::AbstractArray{T,1}, 
+    s::AbstractArray{T,1}, 
+    rep::U;
+    vision=false
+    ) where {T <: AbstractFloat, U <: Integer}
+    
+    n = length(x) 
+    m = length(s)
+    y = zeros(T, rep * m)
+    peaks = zeros(Int64, rep)
+
+    ℝ = xcorr(s, x)
+    info("peak value: $(maximum(ℝ))")                              
+    box = plot(x, size=(800,200))
+    𝓡 = sort(ℝ[local_maxima(ℝ)], rev = true)
+    isempty(𝓡) && ( return (y, diff(peaks)) )
+
+
+    # find the anchor point
+    ploc = find(z->z==𝓡[1],ℝ)[1]
+    peaks[1] = ploc
+    info("peak anchor-[1] in correlation: $ploc")
+    lb = n - ploc + 1
+    rb = min(lb + m - 1, length(x))
+    y[1:1+rb-lb] = x[lb:rb]
+    ip = 1
+    1+rb-lb < m && warn("incomplete segment extracted!")
+
+    if vision
+        box_hi = maximum(x[lb:rb])
+        box_lo = minimum(x[lb:rb])
+        plotly()
+        plot!(box,[lb,rb],[box_hi, box_hi], color = "red", lw=1)
+        plot!(box,[lb,rb],[box_lo, box_lo], color = "red", lw=1)
+        plot!(box,[lb,lb],[box_hi, box_lo], color = "red", lw=1)
+        plot!(box,[rb,rb],[box_hi, box_lo], color = "red", lw=1)
+    end
+
+    if rep > 1
+        for i = 2:length(𝓡)
+            ploc = find(z->z==𝓡[i],ℝ)[1]
+            if sum(abs.(peaks[1:ip] - ploc) .> m) == ip
+                ip += 1
+                peaks[ip] = ploc
+                info("peak anchor-[$ip] in correlation: $ploc")
+                lb = n - ploc + 1
+                rb = min(lb + m - 1, length(x))
+                
+                if vision
+                    box_hi = maximum(x[lb:rb])
+                    box_lo = minimum(x[lb:rb])    
+                    plot!(box,[lb,rb],[box_hi, box_hi], color = "red", lw=1)
+                    plot!(box,[lb,rb],[box_lo, box_lo], color = "red", lw=1)
+                    plot!(box,[lb,lb],[box_hi, box_lo], color = "red", lw=1)
+                    plot!(box,[rb,rb],[box_hi, box_lo], color = "red", lw=1)
+                end
+
+                y[1+(ip-1)*m : 1+(ip-1)*m+(rb-lb)] = x[lb:rb]
+                1+rb-lb < m && warn("incomplete segment extracted!")
+                
+                if ip == rep
+                    break
+                end
+            end
+        end
+        peaks = sort(peaks)
+    end
+    vision && display(box)
+    (y, diff(peaks))
+end
+
+
+
+
+function signal_to_distortion_ratio(x::AbstractArray{T,1}, t::AbstractArray{T,1}) where T <: AbstractFloat
+
+    y,diffpeak = extract_symbol_and_merge(x, t, 1)
+    10log10.(sum(t.^2, 1) ./ sum((t-y).^2, 1))
+end
 
 
 end # module
