@@ -81,13 +81,13 @@ struct Layout
 end
 
 
-function generate_specification()
+function generate_specification(path_mix::String, path_speech::String, path_noise::String)
 
     x = Array{Dict{String,Any},1}()
     a = Dict( 
-        "root_mix" => "D:\\5-Workspace\\Mix",
-        "root_speech" => "D:\\5-Workspace\\Voice\\",
-        "root_noise" => "D:\\5-Workspace\\GoogleAudioSet",
+        "root_mix" => path_mix,
+        "root_speech" => path_speech,
+        "root_noise" => path_noise,
         "sample_rate" => 16000,
         "speech_level_db" => [-22.0, -32.0, -42.0],
         "snr" => [20.0, 15.0, 10.0, 5.0, 0.0, -5.0],
@@ -96,21 +96,26 @@ function generate_specification()
         "train_seconds" => 1000,
         "test_seconds" => 1000,
         "random_seed" => 42,
-        "feature" => Dict("frame_length"=>512, "hop_length"=>128, "context_frames"=>11, "nat_frames"=>7),
+        "feature" => Dict(
+            "frame_length"=>512, 
+            "hop_length"=>128,
+            "mel_bands" =>136, 
+            "context_frames"=>11, 
+            "nat_frames"=>7),
         "noise_groups" => x
         )
-    for i in DATA.list(a["noise_depot"])
+    for i in DATA.list(a["root_noise"])
         push!(x, Dict("name"=>i,"type"=>"stationary|nonstationary|impulsive","percent"=>0.0))
     end
 
-    !isdir(a["root"]) && mkpath(a["root"])
-    open(joinpath(a["root"],"specification-$(replace(replace("$(now())",":","-"),".","-")).json"),"w") do f
+    mkpath(a["root_mix"])
+    open(joinpath(a["root_mix"],"specification-$(replace(replace("$(now())",":","-"),".","-")).json"),"w") do f
         write(f, JSON.json(a))
     end
 
     # generate initial checksum to trigger level update
-    for i in a["noise_categories"]
-        p = joinpath(a["noise_depot"],i["name"])
+    for i in a["noise_groups"]
+        p = joinpath(a["root_noise"],i["name"])
         DATA.touch_checksum(p)
         println("checksum written to $p")
     end
@@ -508,9 +513,9 @@ function feature(s::Specification, decomp_info; flag="train")
         MAT.matwrite(
             joinpath(spectrum_dir, basename(i[1:end-4]*".mat")), 
             Dict(
-                "ratiomask_dft"=>ratiomask_dft_oracle,
+                # "ratiomask_dft"=>ratiomask_dft_oracle,
                 "ratiomask_mel"=>ratiomask_mel_oracle, 
-                "spectrum_dft"=>magnitude_dft,
+                # "spectrum_dft"=>magnitude_dft,
                 "spectrum_mel"=>magnitude_mel)
         )
 
