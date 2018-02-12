@@ -91,7 +91,7 @@ function generate_specification(path_mix::String, path_speech::String, path_nois
         "sample_rate" => 16000,
         "speech_level_db" => [-22.0, -32.0, -42.0],
         "snr" => [20.0, 15.0, 10.0, 5.0, 0.0, -5.0],
-        "speech_noise_time_ratio" => 0.1,
+        "speech_noise_time_ratio" => 0.6,
         "train_test_split_ratio" => 0.7,
         "train_seconds" => 1000,
         "test_seconds" => 1000,
@@ -100,12 +100,26 @@ function generate_specification(path_mix::String, path_speech::String, path_nois
             "frame_length"=>512, 
             "hop_length"=>128,
             "mel_bands" =>136, 
-            "context_frames"=>11, 
-            "nat_frames"=>7),
+            "context_frames"=>31, 
+            "nat_frames"=>15),
         "noise_groups" => x
         )
-    for i in DATA.list(a["root_noise"])
-        push!(x, Dict("name"=>i,"type"=>"stationary|nonstationary|impulsive","percent"=>0.0))
+
+    function foldersize(foldername)
+        sz = 0
+        for i in DATA.list(joinpath(a["root_noise"], foldername), t=".wav")
+            sz += filesize(i)
+        end
+        return sz
+    end
+
+    foldernames = DATA.list(a["root_noise"])
+    sz_list = zeros(Int64, length(foldernames))
+    for (j,k) in enumerate(foldernames)
+        sz_list[j] = foldersize(k)
+    end
+    for (j,k) in enumerate(foldernames)
+        push!(x, Dict("name"=>k,"type"=>"stationary","percent"=>100 * (sz_list[j]/sum(sz_list))))
     end
 
     mkpath(a["root_mix"])
@@ -194,7 +208,33 @@ function build_level_json(path, rate::Int64)
 end
 
 
+function merge_speech_json(path)
+    # merge json of subdirs into its parent folder
+    subfolders = readdir(path)
+    united = Dict{String, Any}()
+    united["DATA"] = Dict{String, Any}()
+    united["META"] = Dict{String, Any}()
 
+    united["META"]["sample_rate"] = 0
+    united["META"]["len_max"] = 0
+    united["META"]["len_min"] = 16000*3600*365
+    united["META"]["len_sum"] = 0
+
+    for i in subfolders
+        partial = JSON.parsefile(joinpath(path, i, "level.json"))
+        for j in partial["DATA"]
+            united["DATA"][i * "/" * j[1]] = j[2]
+        end
+        partial["META"]["len_max"] > united["META"]["len_max"] && (united["META"]["len_max"] = partial["META"]["len_max"])
+        partial["META"]["len_min"] < united["META"]["len_min"] && (united["META"]["len_min"] = partial["META"]["len_min"])
+        united["META"]["len_sum"] += partial["META"]["len_sum"]
+        united["META"]["sample_rate"] = partial["META"]["sample_rate"]
+    end
+
+    open(joinpath(path,"level.json"),"w") do f
+        write(f, JSON.json(united))
+    end
+end
 
 
 
@@ -255,7 +295,9 @@ function wavgen(s::Specification, data::Layout; flag="train")
     source = Dict{String, Tuple{String, String}}()
 
     root_mix_flag_wav = joinpath(s.root_mix, flag, "wav")
+    rm(root_mix_flag_wav, force=true, recursive=true)
     mkpath(root_mix_flag_wav)
+
     time = (flag=="train")? s.train_seconds : s.test_seconds
     n_count = 1
 
@@ -418,15 +460,13 @@ function mix(s::Specification)
 
     srand(s.seed)
     !isdir(s.root_noise) && error("noise depot doesn't exist")
-    !isdir(s.root_speech) && error("speech depot doesn't exist")    
-    for i in DATA.list(s.root_mix, t=".wav")
-        rm(i, force=true)
-    end
+    !isdir(s.root_speech) && error("speech depot doesn't exist")
+    mkpath(s.root_mix)
 
     for i in s.noise_groups
         path = joinpath(s.root_noise,i["name"])
         if !DATA.verify_checksum(path)
-            println("checksum mismatch: updating level index...")
+            println("checksum mismatch: updating level...")
             build_level_json(path, s.sample_rate)
             DATA.update_checksum(path)
         end
@@ -643,18 +683,17 @@ function tensor(s::Specification; flag="train")
     # side-effect: write tensors to /flag/tensor/*.mat
 
     tensor_dir = joinpath(s.root_mix, flag, "tensor")
+    rm(tensor_dir, force=true, recursive=true)
     mkpath(tensor_dir)
-    tensor_list = DATA.list(tensor_dir, t=".mat")
-    for i in tensor_list
-        rm(i, force=true)
-    end
     
-    spectrum_list = DATA.list(joinpath(s.root_mix, flag, "spectrum"), t=".mat")
-    for (k,i) in enumerate(spectrum_list)
+    for i in DATA.list(joinpath(s.root_mix, flag, "spectrum"), t=".mat")
+
         data = MAT.matread(i)
         variable = Float32.(FEATURE.sliding(data["spectrum_mel"], div(s.feature["context_frames"]-1,2), s.feature["nat_frames"]))
         label = Float32.(data["ratiomask_mel"])
-        MAT.matwrite(joinpath(tensor_dir, "t_$k.mat"), Dict("variable"=>variable, "label"=>label))
+
+        index = split(basename(i),"+")
+        MAT.matwrite(joinpath(tensor_dir, "t_$(index[1]).mat"), Dict("variable"=>variable, "label"=>label))
     end
     nothing
 end
@@ -667,21 +706,27 @@ function build(path_specification)
 
     s = Specification(path_specification)
     data, info_train, info_test = mix(s)
+
     feature(s, info_train)
     feature(s, info_test, flag="test")
+
     stat_train = statistics(s)
     stat_test = statistics(s, flag="test")
-    tensor(s)
-    tensor(s, flag="test")
 
     sdr_oracle_dft = sdr_benchmark(joinpath(s.root_mix, "test", "decomposition"), joinpath(s.root_mix, "test", "oracle", "dft"))
     sdr_oracle_mel = sdr_benchmark(joinpath(s.root_mix, "test", "decomposition"), joinpath(s.root_mix, "test", "oracle", "mel"))
 
+    # tensor(s)
+    # tensor(s, flag="test")
     # return (data, info_train, info_test)
     return (sdr_oracle_dft, sdr_oracle_mel)
 end
 
 
+function build_tensor(path_specification; flag = "train")
+    s = Specification(path_specification)
+    tensor(s, flag=flag)
+end
 
 
 

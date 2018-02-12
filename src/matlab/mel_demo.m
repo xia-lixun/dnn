@@ -26,6 +26,8 @@ ratiomask_lin_recover = b' * ratiomask_mel;
 figure; plot(ratiomask_lin_recover, 'r'); hold on; grid on;
 plot(ratiomask_lin, 'b--');
 
+
+
 %%
 spectrum_mel = spectrum(:,800);
 spectrum_mel = spectrum_mel ./ sum(b,2);
