@@ -3,25 +3,25 @@
 % 2018-01-16
 function s = specification()
 
-specification.root = 'D:\7-Workspace\';
-specification.noise = 'D:\5-Workspace\GoogleAudioSet\NoSpeech\';
-specification.speech = 'D:\5-Workspace\Voice\';
+specification.root = 'D:\2-Workspace\';
+specification.noise = 'D:\oak\noise_google_audio_set\no_speech\';
+specification.speech = 'D:\oak\speech_timit_lp7_matlab\';
 
 specification.speech_noise_time_ratio = 0.6;
-specification.split_ratio_for_training = 0.75;   % this is also time ratio
+specification.split_ratio_for_training = 0.7;   % this is also time ratio
 specification.speech_level_db = [-22.0 -32.0 -42.0];
 specification.snr = [20.0 15.0 10.0 5.0 0.0 -5.0];
 
-specification.training_seconds = 5000;
+specification.training_seconds = 4000;
 specification.testing_seconds = 2000;
 specification.sample_rate = 16000;
-specification.random_seed = 1234;
+specification.random_seed = 42;
 
 specification.feature.frame_length = 512;
 specification.feature.hop_length = 128;
 specification.feature.context_span = 23;
 specification.feature.nat_frames = 14;
-specification.feature.mel_filter_banks = 26;
+specification.feature.mel_filter_banks = 136;
 
 
 %------------------------noise database----------------------------

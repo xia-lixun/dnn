@@ -10,16 +10,27 @@ function n_frames = generate_feature(s, label, flag)
     end
     delete(fullfile(path_spectrum, '*.mat'));
 
-    path_ideal = fullfile(s.root, flag, 'ideal_reconstruct');
-    if ~exist(path_ideal, 'dir')
-        mkdir(path_ideal);
+    path_decomposition = fullfile(s.root, flag, 'decomposition');
+    path_dft_ideal = fullfile(s.root, flag, 'oracle', 'dft');
+    path_mel_ideal = fullfile(s.root, flag, 'oracle', 'mel');
+    if ~exist(path_decomposition, 'dir')
+        mkdir(path_decomposition);
     end
-    delete(fullfile(path_ideal, '*.wav'));
+    if ~exist(path_dft_ideal, 'dir')
+        mkdir(path_dft_ideal);
+    end
+    if ~exist(path_mel_ideal, 'dir')
+        mkdir(path_mel_ideal);
+    end
+    delete(fullfile(path_decomposition, '*.wav'));
+    delete(fullfile(path_dft_ideal, '*.wav'));
+    delete(fullfile(path_mel_ideal, '*.wav'));
     
     % convert spectrum to tensor, using mel filter bank
-    fb = filter_banks(s.sample_rate, s.feature.frame_length, s.feature.mel_filter_banks, 0, s.sample_rate/2);
-    
+    mel = filter_banks(s.sample_rate, s.feature.frame_length, s.feature.mel_filter_banks, 0, s.sample_rate/2);
+    mel_weight = sum(mel,2);
     n_frames = 0;
+    
     for i = 1:n
         % retrieve the mix/clean speech/noise clip
         [y,fs] = audioread(label(i).path);
@@ -42,8 +53,11 @@ function n_frames = generate_feature(s, label, flag)
         % reconstruct the noise component
         noise_component = y - speech_component;
         noise_component = noise_component + (10^(-120/20)) * rand(size(noise_component));
-        % temp = label(i).path;
-        % audiowrite([temp(1:end-4) '-decomp.wav'], [y speech_component noise_component], s.sample_rate, 'BitsPerSample', 32);
+        
+        % write speech and noise components to
+        % /root/<training|testing>/decomposition
+        [t_dir, t_base, t_ext] = fileparts(label(i).path);
+        audiowrite(fullfile(path_decomposition, [t_base t_ext]), [speech_component noise_component], s.sample_rate, 'BitsPerSample', 32);
         
         % calculate ideal-ratio masks
         nfft = s.feature.frame_length;
@@ -54,18 +68,32 @@ function n_frames = generate_feature(s, label, flag)
         h_speech = stft2(speech_component.', nfft, hop, 0, win);
         h_noise = stft2(noise_component.', nfft, hop, 0, win);
         
-        bm = abs(h_speech)./(abs(h_speech)+abs(h_noise));
-        spec = abs(h_mix);
-        spec = [spec; fb * spec];
-        save(fullfile(path_spectrum,['s_' num2str(i) '.mat']), 'bm', 'spec');
+        ratiomask_dft = abs(h_speech)./(abs(h_speech)+abs(h_noise));
+        ratiomask_mel = (mel * ratiomask_dft) ./ mel_weight;
+        
+        magnitude_dft = abs(h_mix);
+        magnitude_mel = log(mel * magnitude_dft + eps);
+        
+        % save spectrum for dnn training/validation
+        save(fullfile(path_spectrum,[t_base '.mat']), 'ratiomask_mel', 'magnitude_mel');
         
         
         % reconstruct based on ideal-ratio mask for top performance
-        ideal_reconstruct = bm .* h_mix;
-        % ideal_noise = (1-bm) .* h_mix; % don't care
+        % write best recovered speech in dft band to
+        % /root/<training|testing>/oracle/dft
+        % write best recovered speech in mel band to
+        % /root/<training|testing>/oracle/mel
+        
+        oracle_dft = ratiomask_dft .* h_mix;
+        oracle_mel = (mel.' * ratiomask_mel) .* h_mix;
+        % oracle_noise = (1 - oracle_dft) .* h_mix; % don't care for now
         scale = 2;
-        speech_best_recovered = stft2(ideal_reconstruct, nfft, hop, 0, win) * scale;
-        audiowrite(fullfile(path_ideal,['i_' num2str(i) '.wav']), speech_best_recovered, s.sample_rate, 'BitsPerSample', 32);
-        n_frames = n_frames + size(bm,2);
+        speech_recovered_dft = scale * stft2(oracle_dft, nfft, hop, 0, win);
+        speech_recovered_mel = scale * stft2(oracle_mel, nfft, hop, 0, win);
+        
+        audiowrite(fullfile(path_dft_ideal,[t_base t_ext]), speech_recovered_dft, s.sample_rate, 'BitsPerSample', 32);
+        audiowrite(fullfile(path_mel_ideal,[t_base t_ext]), speech_recovered_mel, s.sample_rate, 'BitsPerSample', 32);
+        
+        n_frames = n_frames + size(magnitude_mel,2);
     end
 end

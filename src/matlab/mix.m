@@ -1,7 +1,7 @@
 % data mixing scripts for dnn speech enhancement
 % lixun.xia2@harman.com
 % 2018-01-16
-function [data, train_label, test_label, train_log, test_log] = mix()
+function [sdr_oracle_dft, sdr_oracle_mel] = mix()
 
     s = specification();
     data = index(s);
@@ -19,13 +19,18 @@ function [data, train_label, test_label, train_log, test_log] = mix()
     train_frames = generate_feature(s, train_label, 'training');
     test_frames = generate_feature(s, test_label, 'testing');
     
-    [mu_bm_train, mu_spec_train, std_bm_train, std_spec_train] = statistics(s, train_label, train_frames, 'training');
-    [mu_bm_test, mu_spec_test, std_bm_test, std_spec_test] = statistics(s, test_label, test_frames, 'testing');
     
-    tensor(s, train_label, mu_spec_train, std_spec_train, 'training');
-    tensor(s, test_label, mu_spec_train, std_spec_train, 'testing');
+    [mu_bm_train, mu_spec_train, std_bm_train, std_spec_train] = statistics(s, train_frames, 'training');
+    [mu_bm_test, mu_spec_test, std_bm_test, std_spec_test] = statistics(s, test_frames, 'testing');
+    figure; hold on; grid on; plot(mu_bm_train); plot(mu_bm_test);
+    figure; hold on; grid on; plot(mu_spec_train); plot(mu_spec_test);
     
-    save(fullfile(s.root, 'training', 'statistics.mat'), 'mu_spec_train', 'std_spec_train');
+    sdr_oracle_dft = sdr_benchmark(fullfile(s.root,'training', 'oracle', 'dft'), fullfile(s.root, 'training', 'decomposition'));
+    sdr_oracle_mel = sdr_benchmark(fullfile(s.root,'training', 'oracle', 'mel'), fullfile(s.root, 'training', 'decomposition'));
+    
+    tensor(s, 'training');
+    tensor(s, 'testing');
+    
 end
 
 
@@ -98,3 +103,6 @@ function save2json(object, path)
     fprintf(fid, jsonencode(object));
     fclose(fid);
 end
+
+
+

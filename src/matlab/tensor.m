@@ -1,7 +1,7 @@
-function tensor(s, label, mu, std, flag)
+function tensor(s, flag)
 
-    n = length(label);
     path_spectrum = fullfile(s.root, flag, 'spectrum');
+    dataset = dir(fullfile(path_spectrum, '*.mat'));
     
     % prepare tensor folder
     path_tensor = fullfile(s.root, flag, 'tensor');
@@ -11,12 +11,15 @@ function tensor(s, label, mu, std, flag)
     delete(fullfile(path_tensor, '*.mat'));
 
     % convert spectrum to tensor
-    for i = 1:n
-        load(fullfile(path_spectrum,['s_' num2str(i) '.mat']), 'bm', 'spec');
-        spec = sliding((spec - mu)./std, (s.feature.context_span-1)/2, s.feature.nat_frames);
-        bm = single(bm.');
-        spec = single(spec.');
-        save(fullfile(path_tensor,['t_' num2str(i) '.mat']), 'bm', 'spec', '-v6');
+    for i = 1:length(dataset)
+        load(fullfile(path_spectrum, dataset(i).name), 'ratiomask_mel', 'magnitude_mel');
+        variable = single(sliding(magnitude_mel, (s.feature.context_span-1)/2, s.feature.nat_frames));
+        label = single(ratiomask_mel);
+        
+        temp = split(dataset(i).name, '+');
+        save(fullfile(path_tensor, ['t_' temp{1} '.mat']), 'label', 'variable', '-v6');
+        clear ratiomask_mel
+        clear magnitude_mel
     end
     
 end
