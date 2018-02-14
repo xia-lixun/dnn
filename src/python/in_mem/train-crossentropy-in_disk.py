@@ -31,7 +31,7 @@ def dataset_size(path):
 
 TRAIN_ROOT = '/home/coc/workspace/train/'
 TEST_ROOT = '/home/coc/workspace/test/'
-MODEL_LOCATION = '/home/coc/workspace/model-20180209.mat'
+MODEL_LOCATION = '/home/coc/workspace/model-20180214.mat'
 
 
 # tensor size and system memory utilization
@@ -41,21 +41,21 @@ TEST_FILES, TEST_BYTES = dataset_size(TEST_ROOT)
 TRAIN_FILES, TRAIN_BYTES = dataset_size(TRAIN_ROOT)
 TEST_PARTITIONS = int(TEST_BYTES // (MEM_AVAILABLE * MEM_UTIL_RATIO)) + 1
 TRAIN_PARTITIONS = int(TRAIN_BYTES // (MEM_AVAILABLE * MEM_UTIL_RATIO * 0.5)) + 1
-print('train: %f MiB in %d partitions'%(TRAIN_BYTES/1024/1024, TRAIN_PARTITIONS))
-print('test: %f MiB in %d partitions'%(TEST_BYTES/1024/1024, TEST_PARTITIONS))
+print('[init]: train, %f MiB in %d partitions'%(TRAIN_BYTES/1024/1024, TRAIN_PARTITIONS))
+print('[init]: test, %f MiB in %d partitions'%(TEST_BYTES/1024/1024, TEST_PARTITIONS))
 
 # GPU memory utillization
 GPU_MEM_AVAILABLE = 11*1024*1024*1024
 GPU_MEM_UTIL_RATIO = 0.4
 TEST_BATCH_PARTITIONS = int((TEST_BYTES/TEST_PARTITIONS) // (GPU_MEM_AVAILABLE * GPU_MEM_UTIL_RATIO)) + 1
-print('test: %d GPU partitions for each CPU partition'%(TEST_BATCH_PARTITIONS))
+print('[init]: test, %d GPU partitions for each CPU partition'%(TEST_BATCH_PARTITIONS))
 
 # find out the tensor dimensions
 tensor = loadmat_transpose(os.path.join(TRAIN_ROOT, 't_1.mat'))
 INPUT_DIM = tensor['variable'].shape[1]
 OUTPUT_DIM = tensor['label'].shape[1]
 del tensor
-print('input,output dims = %d,%d' % (INPUT_DIM, OUTPUT_DIM))
+print('[init]: input,output dims = %d,%d' % (INPUT_DIM, OUTPUT_DIM))
 
 
 
@@ -149,36 +149,46 @@ sess.run(tf.global_variables_initializer())
 ##########################
 ##      PROCESSING      ##
 ##########################
+def indexing_dimension(path):
+    dim = []
+    dim.append((0,0,0,0))
 
-def dataset_dimension(path, select):
+    for i in range(1, 1+len([x for x in os.listdir(path)])):
+        temp = loadmat_transpose(os.path.join(path, 't_' + str(i) + '.mat'))
+        
+        var_samples = temp['variable'].shape[0]
+        var_width = temp['variable'].shape[1]
+        lab_samples = temp['label'].shape[0]
+        lab_width = temp['label'].shape[1]
+        assert(var_samples == lab_samples)
+        dim.append((var_samples,var_width, lab_samples, lab_width))
+    return dim
+
+
+
+def dataset_dimension(index, select):
     #note: select can be in any order! [7, 3, 9, 11, 4, ...]
 
-    spect_examples = 0
-    label_examples = 0
-    spect_width = 0
-    label_width = 0
+    var_samples = 0
+    var_width = index[1][1]
+    lab_samples = 0
+    lab_width = index[1][3]
 
-    for p in select:
+    for i in select:
+        var_samples += index[i][0]
+        lab_samples += index[i][2]
 
-        # temp = scio.loadmat(os.path.join(path, 't_' + str(p) + '.mat'))
-        temp = loadmat_transpose(os.path.join(path, 't_' + str(p) + '.mat'))
-
-        spect_examples += temp['variable'].shape[0]
-        label_examples += temp['label'].shape[0]
-        spect_width = temp['variable'].shape[1]
-        label_width = temp['label'].shape[1]
-        del temp
-
-    return spect_examples, spect_width, label_examples, label_width
+    return var_samples, var_width, lab_samples, lab_width
 
 
 
 
-def dataset_load2mem(path, select):
+def dataset_load2mem(path, index, select):
     #note: select can be in any order! [7, 3, 9, 11, 4, ...]
 
-    m, n, p, q = dataset_dimension(path, select)
-    spect = np.zeros((m,n), dtype='float32')
+    m, n, p, q = dataset_dimension(index, select)
+
+    variable = np.zeros((m,n), dtype='float32')
     label = np.zeros((p,q), dtype='float32')
     offset = 0
 
@@ -187,31 +197,32 @@ def dataset_load2mem(path, select):
         #temp = scio.loadmat(os.path.join(path, 't_' + str(i) + '.mat'))
         temp = loadmat_transpose(os.path.join(path, 't_' + str(i) + '.mat'))
 
-        instance = temp['variable'].shape[0]
-        spect[offset:offset+instance] = temp['variable']
-        label[offset:offset+instance] = temp['label']
-        offset += instance
+        stride = temp['variable'].shape[0]
+        variable[offset:offset+stride] = temp['variable']
+        label[offset:offset+stride] = temp['label']
+        offset += stride
+
         del temp
 
-    return spect, label
+    return variable, label
 
 
 
 
-def evaluate_batch_cost(spect, label):
+def evaluate_batch_cost(variable, label):
 
     cost_batch = np.zeros((TEST_BATCH_PARTITIONS))
     for (k,i) in enumerate(np.array_split(range(label.shape[0]), TEST_BATCH_PARTITIONS)):
-        cost_batch[k] = sess.run(cost_op, feed_dict={x:spect[i[0]:i[-1]], t:label[i[0]:i[-1]], keep_prob:1.0})
+        cost_batch[k] = sess.run(cost_op, feed_dict={x:variable[i[0]:i[-1]], t:label[i[0]:i[-1]], keep_prob:1.0})
     return np.mean(cost_batch)
 
 
-def evaluate_total_cost():
+def evaluate_total_cost(index):
     
     total_cost = 0.0
 
     for portion in np.array_split(range(1,1+len([x for x in os.listdir(TEST_ROOT)])), TEST_PARTITIONS):
-        test_spect, test_label = dataset_load2mem(TEST_ROOT, portion)
+        test_spect, test_label = dataset_load2mem(TEST_ROOT, index, portion)
         # print('spectrum size %d %d' % (test_spect.shape[0], test_spect.shape[1]))
         # print('label size %d %d' %(test_label.shape[0], test_label.shape[1]))
         total_cost += evaluate_batch_cost(test_spect, test_label)
@@ -230,23 +241,28 @@ def training():
     lr_rt = LEARN_RATE_INIT
 
 
-    cost_validation = evaluate_total_cost()
-    print('[init]: validation cost: %.3f ' % (cost_validation))
+    time_start = time.time()
+    dim_test = indexing_dimension(TEST_ROOT)
+    dim_train = indexing_dimension(TRAIN_ROOT)
+    time_end = time.time()
+    print('[init]: dimension indexing done, %.3f (sec)'%(time_end-time_start))
+
+    cost_validation = evaluate_total_cost(dim_test)
+    print('[init]: validation cost = %.3f ' % (cost_validation))
 
 
     for epoch in range(N_EPOCHS):
 
-        print('----------------------------------------------------------------------')        
+        print('----------------------------------------------------------------------')
         #if epoch >= 30:
         #    lr_rt = 0.001
         #if epoch >= 40:
         #    lr_rt = 0.0001
 
         time_start = time.time()
+        for rand_portion in np.array_split(shuffle(range(1,1+len([x for x in os.listdir(TRAIN_ROOT)]))), TRAIN_PARTITIONS):
 
-        for rand_portion in np.array_split(shuffle(range(1,1+len([x for x in os.listdir(TRAIN_ROOT)]))), TEST_PARTITIONS):
-
-            train_spect, train_label = dataset_load2mem(TRAIN_ROOT, rand_portion)
+            train_spect, train_label = dataset_load2mem(TRAIN_ROOT, dim_train, rand_portion)
             train_spect, train_label = shuffle(train_spect, train_label)
 
             for i in range(train_label.shape[0] // bs_rt):
@@ -257,8 +273,7 @@ def training():
             del train_spect
             del train_label
 
-        cost_validation = evaluate_total_cost()
-        
+        cost_validation = evaluate_total_cost(dim_test)
         time_end = time.time()
         print('[epoch %i] validation cost = %.3f'%(epoch+1, cost_validation))
         print('[epoch %i] time = %.3f (sec)'%(epoch+1, time_end-time_start))
@@ -276,8 +291,7 @@ def training():
 
             scio.savemat(MODEL_LOCATION, save_dict)
             cost_optimal = cost_validation
-            print('[epoch %d] |||||||||||||||||||| model saved ||||||||||||||||||||' % (epoch + 1))
-
+            print('[epoch %d] ||||||||||||||||||||| model saved ||||||||||||||||||||||' % (epoch + 1))
 
 training()
 sess.close()
