@@ -26,7 +26,7 @@ function inference(s, model_path, wav_path)
         ratiomask_mel = feed_forward(model, tensor);
         
         % reconstruct based on bm estimate
-        model_reconstruct = (mel.' * ratiomask_mel) .* spect;
+        model_reconstruct = (mel.' * ratiomask_mel) .* spectrum;
         scale = 2;
         speech_recovered = scale * stft2(model_reconstruct, nfft, hop, 0, win);
         audiowrite(fullfile(path_output, todo(i).name), speech_recovered, s.sample_rate, 'BitsPerSample', 32);

@@ -16,7 +16,7 @@ plot(ratiomask_lin_2, 'k--');
 
 
 %%
-load('D:\8-Workspace\train\spectrum\1+Air conditioning+m025wky1+I-nVcl1UdE4+dr3+mjvw0+sx113+-42.0+15.0.mat')
+load('1+Air conditioning+m025wky1+I-nVcl1UdE4+dr3+mjvw0+sx113+-42.0+15.0.mat')
 ratiomask_lin = ratiomask_dft(:,800);
 b = filter_banks(16000, 512, 136, 0, 16000/2);
 ratiomask_mel = (b * ratiomask_lin) ./ sum(b,2);
