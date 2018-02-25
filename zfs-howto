@@ -1,0 +1,9 @@
+1. sudo apt install zfsutils-linux
+2. sudo zfs list
+3. df -h
+4. sudo fdisk -l
+5. sudo zpool create -f oak /dev/sdc /dev/sdd /dev/sde  (raid-0, adaptive stripe)
+6. sudo zfs list
+7. sudo zpool status
+8. sudo zpool create -f oak raidz /dev/sdc /dev/sdd /dev/sde
+9. sudo zpool add -f oak raidz /dev/sdf /dev/sdg /dev/sdh
