@@ -1,11 +1,10 @@
-module DATA
+module FileSystem
 # utility functions for data manipualtions
 
 
 import WAV
 import SHA
-
-include("ui.jl")
+include("visual.jl")
 
 
 
@@ -45,13 +44,13 @@ function checksum(list::Array{String,1})
     
     d = zeros(UInt8, 32)
     n = length(list)
-    p = UI.Progress(10)
+    p = Visual.ProgressBar(10)
     
     for (i, j) in enumerate(list)
         d .+= open(j) do f
             SHA.sha256(f)
         end
-        UI.update(p, i, n)
+        Visual.update(p, i, n)
     end
     d
 end
@@ -202,5 +201,5 @@ end
 
 
 
-# module
-end
+
+end # module

@@ -1,4 +1,4 @@
-module MIX
+module Mix
 # management of wav files for machine learning projects
 # lixun.xia@outlook.com
 # 2017-10-16
@@ -8,11 +8,10 @@ import MAT
 import WAV
 import JSON
 
-include("data.jl")
-include("feature.jl")
+include("filesystem.jl")
 include("neural.jl")
-
-
+include("visual.jl")
+include("feature.jl")
 
 
 
@@ -81,6 +80,7 @@ struct Layout
 end
 
 
+
 function generate_specification(path_mix::String, path_speech::String, path_noise::String)
 
     x = Array{Dict{String,Any},1}()
@@ -107,13 +107,13 @@ function generate_specification(path_mix::String, path_speech::String, path_nois
 
     function foldersize(foldername)
         sz = 0
-        for i in DATA.list(joinpath(a["root_noise"], foldername), t=".wav")
+        for i in FileSystem.list(joinpath(a["root_noise"], foldername), t=".wav")
             sz += filesize(i)
         end
         return sz
     end
 
-    foldernames = DATA.list(a["root_noise"])
+    foldernames = FileSystem.list(a["root_noise"])
     sz_list = zeros(Int64, length(foldernames))
     for (j,k) in enumerate(foldernames)
         sz_list[j] = foldersize(k)
@@ -130,7 +130,7 @@ function generate_specification(path_mix::String, path_speech::String, path_nois
     # generate initial checksum to trigger level update
     for i in a["noise_groups"]
         p = joinpath(a["root_noise"],i["name"])
-        DATA.touch_checksum(p)
+        FileSystem.touch_checksum(p)
         println("checksum written to $p")
     end
     nothing
@@ -139,7 +139,7 @@ end
 
 function build_level_index(path, rate)
 
-    a = DATA.list(path, t=".wav")
+    a = FileSystem.list(path, t=".wav")
     n = length(a)
 
     lpek = zeros(n)
@@ -155,7 +155,7 @@ function build_level_index(path, rate)
             assert(size(x,2) == 1)
             y = view(x,:,1)
             lpek[i] = maximum(abs.(y))
-            lrms[i] = FEATURE.rms(y)
+            lrms[i] = Fast.rms(y)
             lmed[i] = median(abs.(y))
             leng[i] = length(y)
         catch
@@ -172,7 +172,7 @@ end
 
 function build_level_json(path, rate::Int64)
 
-    a = DATA.list(path, t=".wav")
+    a = FileSystem.list(path, t=".wav")
     d = Dict{String,Any}()
     d["DATA"] = Dict{String,Any}()
 
@@ -189,7 +189,7 @@ function build_level_json(path, rate::Int64)
 
             y = view(x,:,1)
             n = length(y)
-            d["DATA"][relpath(i, path)] = Dict("peak"=>maximum(abs.(y)), "rms"=>FEATURE.rms(y), "median"=>median(abs.(y)), "samples"=>n)
+            d["DATA"][relpath(i, path)] = Dict("peak"=>maximum(abs.(y)), "rms"=>Fast.rms(y), "median"=>median(abs.(y)), "samples"=>n)
             n < lmin && (lmin = n)
             n > lmax && (lmax = n)
             lsum += n
@@ -465,15 +465,15 @@ function mix(s::Specification)
 
     for i in s.noise_groups
         path = joinpath(s.root_noise,i["name"])
-        if !DATA.verify_checksum(path)
+        if !FileSystem.verify_checksum(path)
             println("checksum mismatch: updating level...")
             build_level_json(path, s.sample_rate)
-            DATA.update_checksum(path)
+            FileSystem.update_checksum(path)
         end
     end
-    if !DATA.verify_checksum(s.root_speech)
+    if !FileSystem.verify_checksum(s.root_speech)
         # todo: speech dB rms via voicebox
-        DATA.update_checksum(s.root_speech)
+        FileSystem.update_checksum(s.root_speech)
     end
 
     data = Layout(s)
@@ -495,7 +495,7 @@ struct Mel{T <: AbstractFloat}
     weight::Array{T,2}
 
     function Mel{T}(s::Specification) where T <: AbstractFloat
-        filter = FEATURE.mel_filterbanks(T, s.sample_rate, s.feature["frame_length"], filt_num=s.feature["mel_bands"])
+        filter = Fast.mel_filterbanks(T, s.sample_rate, s.feature["frame_length"], filt_num=s.feature["mel_bands"])
         weight = sum(filter,2)
         weight .= ones(T,size(weight)) ./ (weight .+ eps(T))
         new(filter, filter.', weight)
@@ -540,9 +540,9 @@ function feature(s::Specification, decomp_info; flag="train")
         x_purenoise = x_mix - x_purevoice + rand(size(x_mix)) * (10^(-120/20))
         WAV.wavwrite(hcat(x_purevoice, x_purenoise), joinpath(decomp_dir, basename(i)),Fs=s.sample_rate)
 
-        𝕏m, hm = FEATURE.stft2(x_mix, s.feature["frame_length"], s.feature["hop_length"], FEATURE.sqrthann)
-        𝕏v, h = FEATURE.stft2(x_purevoice, s.feature["frame_length"], s.feature["hop_length"], FEATURE.sqrthann)
-        𝕏n, h = FEATURE.stft2(x_purenoise, s.feature["frame_length"], s.feature["hop_length"], FEATURE.sqrthann)
+        𝕏m, hm = Fast.stft2(x_mix, s.feature["frame_length"], s.feature["hop_length"], Fast.sqrthann)
+        𝕏v, h = Fast.stft2(x_purevoice, s.feature["frame_length"], s.feature["hop_length"], Fast.sqrthann)
+        𝕏n, h = Fast.stft2(x_purenoise, s.feature["frame_length"], s.feature["hop_length"], Fast.sqrthann)
         
         ratiomask_dft_oracle = abs.(𝕏v) ./ (abs.(𝕏v) + abs.(𝕏n))
         ratiomask_mel_oracle = (mel.filter * ratiomask_dft_oracle) .* mel.weight
@@ -560,20 +560,20 @@ function feature(s::Specification, decomp_info; flag="train")
         )
 
         # oracle performance
-        oracle_mel = FEATURE.stft2(
+        oracle_mel = Fast.stft2(
             𝕏m .* (mel.filter.' * ratiomask_mel_oracle), 
             hm, 
             s.feature["frame_length"], 
             s.feature["hop_length"], 
-            FEATURE.sqrthann)
+            Fast.sqrthann)
         WAV.wavwrite(2oracle_mel, joinpath(oracle_mel_dir,basename(i)), Fs=s.sample_rate)
 
-        oracle_dft = FEATURE.stft2(
+        oracle_dft = Fast.stft2(
             𝕏m .* ratiomask_dft_oracle,
             hm, 
             s.feature["frame_length"], 
             s.feature["hop_length"], 
-            FEATURE.sqrthann)
+            Fast.sqrthann)
         WAV.wavwrite(2oracle_dft, joinpath(oracle_dft_dir,basename(i)), Fs=s.sample_rate)
     end
     nothing
@@ -588,7 +588,7 @@ function statistics(s::Specification; flag = "train")
     # return: dictionary ["mu_spectrum"],["std_spectrum"],["mu_ratiomask"],["frames"]
     # side-effect: write dictionary aforementioned to /flag/statistics.mat
 
-    spectrum_list = DATA.list(joinpath(s.root_mix, flag, "spectrum"), t=".mat")
+    spectrum_list = FileSystem.list(joinpath(s.root_mix, flag, "spectrum"), t=".mat")
 
     # detect dimensions
     spectrum_size = 0
@@ -686,10 +686,10 @@ function tensor(s::Specification; flag="train")
     rm(tensor_dir, force=true, recursive=true)
     mkpath(tensor_dir)
     
-    for i in DATA.list(joinpath(s.root_mix, flag, "spectrum"), t=".mat")
+    for i in FileSystem.list(joinpath(s.root_mix, flag, "spectrum"), t=".mat")
 
         data = MAT.matread(i)
-        variable = Float32.(FEATURE.sliding(data["spectrum_mel"], div(s.feature["context_frames"]-1,2), s.feature["nat_frames"]))
+        variable = Float32.(Fast.sliding(data["spectrum_mel"], div(s.feature["context_frames"]-1,2), s.feature["nat_frames"]))
         label = Float32.(data["ratiomask_mel"])
 
         index = split(basename(i),"+")
@@ -762,43 +762,43 @@ end
 
 function ratiomask_inference(
     s::Specification,
-    nn::NEURAL.Net{T}, 
+    nn::Neural.Net{T}, 
     𝕏::Array{Complex{T},2}
     ) where T <: AbstractFloat
 
     mag_dft = log.(abs.(𝕏) + eps(T))
-    mag_tensor = FEATURE.sliding(mag_dft, div(s.feature["context_frames"]-1,2), s.feature["nat_frames"])
-    ratiomask = NEURAL.feedforward(nn, mag_tensor)
+    mag_tensor = Fast.sliding(mag_dft, div(s.feature["context_frames"]-1,2), s.feature["nat_frames"])
+    ratiomask = Neural.feedforward(nn, mag_tensor)
 end
 
 
 function ratiomask_inference(
     s::Specification, 
-    nn::NEURAL.Net{T},
+    nn::Neural.Net{T},
     mel::Mel{T},
     𝕏::Array{Complex{T},2}
     ) where T <: AbstractFloat
 
     mag_mel = log.(mel.filter * abs.(𝕏) + eps(T))
-    mag_tensor = FEATURE.sliding(mag_mel, div(s.feature["context_frames"]-1,2), s.feature["nat_frames"])
-    ratiomask_mel = NEURAL.feedforward(nn, mag_tensor)
+    mag_tensor = Fast.sliding(mag_mel, div(s.feature["context_frames"]-1,2), s.feature["nat_frames"])
+    ratiomask_mel = Neural.feedforward(nn, mag_tensor)
     ratiomask = mel.filter_t * ratiomask_mel
 end
 
 
 function wavform_reconstruct(
     s::Specification,
-    nn::NEURAL.Net{Float32},
+    nn::Neural.Net{Float32},
     mel::Mel{Float32},
     x::AbstractArray{Float32,1}
     )
     # return: ratiomask inference
     # side-effect: write processed wav side-by-side to the original
 
-    𝕏,h = FEATURE.stft2(x, s.feature["frame_length"], s.feature["hop_length"], FEATURE.sqrthann)
+    𝕏,h = Fast.stft2(x, s.feature["frame_length"], s.feature["hop_length"], Fast.sqrthann)
     ratiomask = ratiomask_inference(s, nn, mel, 𝕏)
     𝕏 .*= ratiomask
-    y = FEATURE.stft2(𝕏, h, s.feature["frame_length"], s.feature["hop_length"], FEATURE.sqrthann)
+    y = Fast.stft2(𝕏, h, s.feature["frame_length"], s.feature["hop_length"], Fast.sqrthann)
     return (2y,ratiomask)
 end
 
@@ -812,7 +812,7 @@ function process_dataset(
     # side-effect: write processed wav files to wav_dir/processed/
 
     s = Specification(specification_file)
-    nn = NEURAL.Net{Float32}(model_file)
+    nn = Neural.Net{Float32}(model_file)
     mel = Mel{Float32}(s)
 
     dir_out = joinpath(wav_dir, "processed")
@@ -820,7 +820,7 @@ function process_dataset(
     mkpath(dir_out)
 
     ratiomask_infer = Dict{String, Array{Float32,2}}()
-    for i in DATA.list(wav_dir, t=".wav")
+    for i in FileSystem.list(wav_dir, t=".wav")
         x,sr = WAV.wavread(i)
         assert(typeof(s.sample_rate)(sr) == s.sample_rate)
         y,ratiomask_infer[i] = wavform_reconstruct(s, nn, mel, view(Float32.(x),:,1))
@@ -841,13 +841,13 @@ function sdr_benchmark(reference_dir::String, evaluation_dir::String)
     # file names must be identical in both folders
     # evaluation dir may contain a subset of the reference
     sdr = zeros(1,1)
-    items = DATA.list(evaluation_dir, t=".wav")
+    items = FileSystem.list(evaluation_dir, t=".wav")
 
     for i in items
         t,sr = WAV.wavread(joinpath(reference_dir, basename(i)))
         x,sr = WAV.wavread(i)
         println(i)
-        sdr += FEATURE.signal_to_distortion_ratio(view(x,:,1), view(t,:,1))
+        sdr += Fast.signal_to_distortion_ratio(view(x,:,1), view(t,:,1))
     end
     return sdr/length(items)
 end

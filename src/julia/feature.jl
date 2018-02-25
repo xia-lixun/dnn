@@ -1,36 +1,37 @@
-module FEATURE
+module Fast
 
 
 using Polynomials
 using Plots
 
 
-# bilinear transformation of transfer function from s-domain to z-domain
-# via s = 2/T (z-1)/(z+1)
-# let ζ = z^(-1) we have s = -2/T (ζ-1)/(ζ+1)
-# 
-#          b_m s^m + b_(m-1) s^(m-1) + ... + b_1 s + b_0
-# H(s) = -------------------------------------------------
-#          a_n s^n + a_(n-1) s^(n-1) + ... + a_1 s + a_0
-#
-# So 
-#
-#          b_m (-2/T)^m (ζ-1)^m / (ζ+1)^m  + ... + b_1 (-2/T) (ζ-1)/(ζ+1) + b_0 
-# H(ζ) = -------------------------------------------------------------------------
-#          a_n (-2/T)^n (ζ-1)^n / (ζ+1)^n  + ... + a_1 (-2/T) (ζ-1)/(ζ+1) + a_0
-#
-# Since we assume H(s) is rational, so n ≥ m, multiply num/den with (ζ+1)^n ans we have
-#
-#          b_m (-2/T)^m (ζ-1)^m (ζ+1)^(n-m)  + b_(m-1) (-2/T)^(m-1) (ζ-1)^(m-1) (ζ+1)^(n-m+1) + ... + b_1 (-2/T) (ζ-1)(ζ+1)^(n-1) + b_0 (ζ+1)^n
-# H(ζ) = ---------------------------------------------------------------------------------------------------------------------------------------
-#          a_n (-2/T)^n (ζ-1)^n  + a_(n-1) (-2/T)^(n-1) (ζ-1)^(n-1) (ζ+1) ... + a_1 (-2/T) (ζ-1)(ζ+1)^(n-1) + a_0 (ζ+1)^n
-#
-#
-#         B[0] + B[1]ζ + B[2]ζ^2 + ... B[m]ζ^m
-# H(ζ) = ---------------------------------------
-#         A[0] + A[1]ζ + A[2]ζ^2 + ... A[n]ζ^n
+
 
 function bilinear(b, a, fs)
+    # bilinear transformation of transfer function from s-domain to z-domain
+    # via s = 2/T (z-1)/(z+1)
+    # let ζ = z^(-1) we have s = -2/T (ζ-1)/(ζ+1)
+    # 
+    #          b_m s^m + b_(m-1) s^(m-1) + ... + b_1 s + b_0
+    # H(s) = -------------------------------------------------
+    #          a_n s^n + a_(n-1) s^(n-1) + ... + a_1 s + a_0
+    #
+    # So 
+    #
+    #          b_m (-2/T)^m (ζ-1)^m / (ζ+1)^m  + ... + b_1 (-2/T) (ζ-1)/(ζ+1) + b_0 
+    # H(ζ) = -------------------------------------------------------------------------
+    #          a_n (-2/T)^n (ζ-1)^n / (ζ+1)^n  + ... + a_1 (-2/T) (ζ-1)/(ζ+1) + a_0
+    #
+    # Since we assume H(s) is rational, so n ≥ m, multiply num/den with (ζ+1)^n ans we have
+    #
+    #          b_m (-2/T)^m (ζ-1)^m (ζ+1)^(n-m)  + b_(m-1) (-2/T)^(m-1) (ζ-1)^(m-1) (ζ+1)^(n-m+1) + ... + b_1 (-2/T) (ζ-1)(ζ+1)^(n-1) + b_0 (ζ+1)^n
+    # H(ζ) = ---------------------------------------------------------------------------------------------------------------------------------------
+    #          a_n (-2/T)^n (ζ-1)^n  + a_(n-1) (-2/T)^(n-1) (ζ-1)^(n-1) (ζ+1) ... + a_1 (-2/T) (ζ-1)(ζ+1)^(n-1) + a_0 (ζ+1)^n
+    #
+    #
+    #         B[0] + B[1]ζ + B[2]ζ^2 + ... B[m]ζ^m
+    # H(ζ) = ---------------------------------------
+    #         A[0] + A[1]ζ + A[2]ζ^2 + ... A[n]ζ^n
 
     m = size(b,1)-1
     n = size(a,1)-1
@@ -81,9 +82,10 @@ end
 
 
 
-# example: create a-weighting filter in z-domain
+
 function weighting_a(fs)
-    
+    # example: create a-weighting filter in z-domain
+
     f1 = 20.598997
     f2 = 107.65265
     f3 = 737.86223
@@ -108,8 +110,10 @@ AWEIGHT_16kHz_BA = [0.531489829823557 -1.062979659647115 -0.531489829823556 2.12
 
                     
     
-# transfer function filter in z-domain
+
 function tf_filter(B, A, x)
+    # transfer function filter in z-domain
+    #
     #   y(n)        b(1) + b(2)Z^(-1) + ... + b(M+1)Z^(-M)
     # --------- = ------------------------------------------
     #   x(n)        a(1) + a(2)Z^(-1) + ... + a(N+1)Z^(-N)
@@ -145,9 +149,6 @@ end
 
 
 
-# n_update  (shift samples)
-# n_overlap (overlapping samples)
-# n_block   (block size)
 
 function hamming(T, n; flag="")
 
@@ -162,6 +163,7 @@ function hamming(T, n; flag="")
     ω
 end
 
+
 function hann(T, n; flag="")
 
     lowercase(flag) == "periodic" && (n += 1)
@@ -175,38 +177,41 @@ function hann(T, n; flag="")
     ω
 end
 
+
 sqrthann(T,n) = sqrt.(hann(T,n,flag="periodic"))
 
 
 
 
-# immutable type definition
-# note that BlockProcessing{Int16}(1024.0, 256.0, 0) is perfectly legal as new() will convert every parameter to T
-# but BlockProcessing{Int16}(1024.0, 256.3, 0) would not work as it raises InexactError()
-# also note that there is not white space between BlockProcessing and {T <: Integer}
-struct Frame1D{T <: Integer}
-    rate::T
+
+struct Frame1{T <: Integer}
+    # immutable type definition
+    # note that Frame1{Int16}(1024.0, 256.0, 0) is perfectly legal as new() will convert every parameter to T
+    # but Frame1{Int16}(1024.0, 256.3, 0) would not work as it raises InexactError()
+    # also note that there is not white space between Frame1 and {T <: Integer}
+    samplerate::T
     block::T
     update::T
     overlap::T
-    Frame1D{T}(r, x, y, z) where {T <: Integer} = x < y ? error("block size must ≥ update size!") : new(r, x, y, x-y)
+    Frame1{T}(r, x, y, z) where {T <: Integer} = x < y ? error("block size must ≥ update size!") : new(r, x, y, x-y)
+    # we define an outer constructor as the inner constructor infers the overlap parameter
+    # again the block and update accepts Integers as well as AbstractFloat w/o fractions
+    #
+    # example type outer constructors: 
+    # FrameInSample(fs, block, update) = Frame1{Int64}(fs, block, update, 0)
+    # FrameInSecond(fs, block, update) = Frame1{Int64}(fs, floor(block * fs), floor(update * fs), 0)
 end
-# we define an outer constructor as the inner constructor infers the overlap parameter
-# again the block_len and update_len accepts Integers as well as AbstructFloat with no fractions
-#
-# example type outer constructors: 
-# FrameInSample(fs, block, update) = Frame1D{Int64}(fs, block, update, 0)
-# FrameInSecond(fs, block, update) = Frame1D{Int64}(fs, floor(block * fs), floor(update * fs), 0)
 
 
-# extend array x with prefix/appending zeros for frame slicing
-# 1. this is an utility function used by get_frames()
-# 2. new data are allocated, so origianl x is untouched.
-# 3. zero_init = true: the first frame will have zeros of length nfft-nhop
-# 4. zero_append = true: the last frame will partially contain data of original x
-function tile(x::AbstractArray{T,1}, p::Frame1D{U}; zero_init=false, zero_append=false) where {T <: AbstractFloat, U <: Integer}
-    
-    zero_init && (x = [zeros(T, p.overlap); x])                                     # zero padding to the front for defined init state
+
+function tile(x::AbstractArray{T,1}, p::Frame1{U}; zero_prepend=false, zero_append=false) where {T <: AbstractFloat, U <: Integer}
+    # extend array x with prefix/appending zeros for frame slicing
+    # this is an utility function used by getframes(),spectrogram()...
+    # new data are allocated, so origianl x is untouched.
+    # zero_prepend = true: the first frame will have zeros of length nfft-nhop
+    # zero_append = true: the last frame will partially contain data of original x    
+
+    zero_prepend && (x = [zeros(T, p.overlap); x])                                  # zero padding to the front for defined init state
     length(x) < p.block && error("signal length must be at least one block!")       # detect if length of x is less than block size
     n = div(size(x,1) - p.block, p.update) + 1                                      # total number of frames to be processed
     
@@ -222,51 +227,59 @@ end
 
 
 
-# function    : get_frames
-# x           : array of AbstractFloat {Float64, Float32, Float16, BigFloat}
-# p           : frame size immutable struct
-# zero_init   : simulate the case when block buffer is init to zero and the first update comes in
-# zero_append : simulate the case when remaining samples of x doesn't make up an update length
-# 
-# example:
-# x = collect(1.0:100.0)
-# p = Frame1D{Int64}(8000, 17, 7.0, 0)
-# y,h = get_frames(x, p) where h is the unfold length in time domain
-function get_frames(x::AbstractArray{T,1}, p::Frame1D{U}; window=ones, zero_init=false, zero_append=false) where {T <: AbstractFloat, U <: Integer}
-    
-    x, n = tile(x, p, zero_init = zero_init, zero_append = zero_append)
+
+function getframes(x::AbstractArray{T,1}, p::Frame1{U}; 
+    window=ones, zero_prepend=false, zero_append=false) where {T <: AbstractFloat, U <: Integer}
+    # function    : getframes
+    # x           : array of AbstractFloat {Float64, Float32, Float16, BigFloat}
+    # p           : frame size immutable struct
+    # zero_prepend   : simulate the case when block buffer is init to zero and the first update comes in
+    # zero_append : simulate the case when remaining samples of x doesn't make up an update length
+    # 
+    # example:
+    # x = collect(1.0:100.0)
+    # p = Frame1{Int64}(8000, 17, 7.0, 0)
+    # y,h = getframes(x, p) where h is the unfold length in time domain    
+
+    x, n = tile(x, p, zero_prepend = zero_prepend, zero_append = zero_append)
     
     ω = window(T, p.block)
     y = zeros(T, p.block, n)
-    h = 0
-    for i = 1:n
-        y[:,i] = ω .* x[h+1:h+p.block]
-        h += p.update
+    
+    for i = 0:n-1
+        y[:,i+1] = ω .* view(x, i*p.update+1:i*p.update+p.block)
     end
-    # h is the total hopping size, +(p.block - p.update) for total non-overlapping length
-    (y,h+(p.block-p.update))
+    # n*p.update is the total hopping size, +(p.block-p.update) for total length
+    (y,n*p.update+(p.block-p.update))
 end
 
-# example:
-# x = collect(1.0:100.0)
-# p = Frame1D{Int64}(8000, 17, 7.0, 0)
-# y,h = spectrogram(x, p, nfft, window=hamming, zero_init=true, zero_append=true) where h is the unfold length in time domain
-function spectrogram(x::AbstractArray{T,1}, p::Frame1D{U}, nfft::U; window=ones, zero_init=false, zero_append=false) where {T <: AbstractFloat, U <: Integer}
-    
+
+function spectrogram(x::AbstractArray{T,1}, p::Frame1{U}; 
+    nfft = p.block, window=ones, zero_prepend=false, zero_append=false) where {T <: AbstractFloat, U <: Integer}
+    # example:
+    # x = collect(1.0:100.0)
+    # p = Frame1{Int64}(8000, 17, 7.0, 0)
+    # y,h = spectrogram(x, p, window=hamming, zero_prepend=true, zero_append=true) 
+    # where h is the unfold length in time domain    
+
     nfft < p.block && error("nfft length must be greater than or equal to block/frame length")
-    x, n = tile(x, p, zero_init = zero_init, zero_append = zero_append)
+    x, n = tile(x, p, zero_prepend = zero_prepend, zero_append = zero_append)
     m = div(nfft,2)+1
 
     ω = window(T, nfft)
-    P = plan_fft(ω)
+    P = plan_rfft(ω)
     𝕏 = zeros(Complex{T}, m, n)
-    h = 0
-    for i = 1:n
-        ξ = P * ( ω .* [x[h+1:h+p.block]; zeros(T,nfft-p.block)] )
-        𝕏[:,i] = ξ[1:m]
-        h += p.update
+
+    if nfft == p.block
+        for i = 0:n-1
+            𝕏[:,i+1] = P * (ω .* view(x, i*p.update+1:i*p.update+p.block))
+        end
+    else
+        for i = 0:n-1
+            𝕏[:,i+1] = P * ( ω .* [view(x, i*p.update+1:i*p.update+p.block); zeros(T,nfft-p.block)] )
+        end
     end
-    (𝕏,h+(p.block-p.update))
+    (𝕏,n*p.update+(p.block-p.update))
 end
 
 
@@ -277,15 +290,19 @@ energy(v) = x.^2
 intensity(v) = abs.(v)
 zero_crossing_rate(v) = floor.((abs.(diff(sign.(v)))) ./ 2)
 
-function short_term(f, x::AbstractArray{T,1}, p::Frame1D{U}; zero_init=false, zero_append=false) where {T <: AbstractFloat, U <: Integer}
-    frames, lu = get_frames(x, p, zero_init=zero_init, zero_append=zero_append)
+
+function short_term(f, x::AbstractArray{T,1}, p::Frame1{U}; 
+    zero_prepend=false, zero_append=false) where {T <: AbstractFloat, U <: Integer}
+
+    frames, lu = getframes(x, p, zero_prepend=zero_prepend, zero_append=zero_append)
     n = size(frames,2)
     ste = zeros(T, n)
     for i = 1:n
-        ste[i] = sum_kbn(f(frames[:,i])) 
+        ste[i] = sum_kbn(f(view(frames,:,i))) 
     end
     ste
 end
+
 
 pp_norm(v) = (v - minimum(v)) ./ (maximum(v) - minimum(v))
 stand(v) = (v - mean(v)) ./ std(v)
@@ -293,33 +310,41 @@ hz_to_mel(hz) = 2595 * log10.(1 + hz * 1.0 / 700)
 mel_to_hz(mel) = 700 * (10 .^ (mel * 1.0 / 2595) - 1)
 
 
-# calculate power spectrum of 1-D array on a frame basis
-# note that T=Float16 may not be well supported by FFTW backend
-function power_spectrum(x::AbstractArray{T,1}, p::Frame1D{U}, nfft::U; window=ones, zero_init=false, zero_append=false) where {T <: AbstractFloat, U <: Integer}
-    
+
+function power_spectrum(x::AbstractArray{T,1}, p::Frame1{U}; 
+    nfft = p.block, window=ones, zero_prepend=false, zero_append=false) where {T <: AbstractFloat, U <: Integer}
+    # calculate power spectrum of 1-D array on a frame basis
+    # note that T=Float16 may not be well supported by FFTW backend
+
     nfft < p.block && error("nfft length must be greater than or equal to block/frame length")
-    x, n = tile(x, p, zero_init = zero_init, zero_append = zero_append)
+    x, n = tile(x, p, zero_prepend = zero_prepend, zero_append = zero_append)
 
     ω = window(T, nfft)
-    f = plan_fft(ω)
+    f = plan_rfft(ω)
     m = div(nfft,2)+1
     ℙ = zeros(T, m, n)
     ρ = T(1 / nfft)
 
-    h = 0
-    for i = 1:n
-        ξ = f * (ω .* [x[h+1:h+p.block]; zeros(T,nfft-p.block)]) # typeof(ξ) == Array{Complex{T},1} 
-        ℙ[:,i] = ρ * ((abs.(ξ[1:m])).^2)
-        h += p.update
+    if nfft == p.block
+        for i = 0:n-1
+            ξ = f * (ω .* view(x, i*p.update+1:i*p.update+p.block)) # typeof(ξ) == Array{Complex{T},1} 
+            ℙ[:,i+1] = ρ * ((abs.(ξ)).^2)
+        end
+    else
+        for i = 0:n-1
+            ξ = f * (ω .* [view(x, i*p.update+1:i*p.update+p.block); zeros(T,nfft-p.block)])
+            ℙ[:,i+1] = ρ * ((abs.(ξ)).^2)
+        end
     end
-    (ℙ,h+(p.block-p.update))
+    (ℙ,n*p.update+(p.block-p.update))
 end
 
 
 
-# calculate filter banks
+
 function mel_filterbanks(T, rate::U, nfft::U; filt_num=26, fl=0, fh=div(rate,2)) where {U <: Integer}
-    
+    # calculate filter banks in Mel domain
+
     fh > div(rate,2) && error("high frequency must be less than or equal to nyquist frequency!")
     
     ml = hz_to_mel(fl)
@@ -349,21 +374,22 @@ function mel_filterbanks(T, rate::U, nfft::U; filt_num=26, fl=0, fh=div(rate,2))
 end
 
 
-function filter_bank_energy(x::AbstractArray{T,1}, p::Frame1D{U}, nfft::U; window=ones, zero_init=false, zero_append=false, filt_num=26, fl=0, fh=div(p.rate,2), use_log=false) where {T <: AbstractFloat, U <: Integer}
+function filter_bank_energy(x::AbstractArray{T,1}, p::Frame1{U}; 
+    nfft = p.block, window=ones, zero_prepend=false, zero_append=false, filt_num=26, fl=0, fh=div(p.rate,2), use_log=false) where {T <: AbstractFloat, U <: Integer}
 
-    ℙ,h = power_spectrum(x, p, nfft, window=window, zero_init=zero_init, zero_append=zero_append)
-    𝔽 = filter_banks(T, p.rate, nfft, filt_num=filt_num, fl=fl, fh=fh)
+    ℙ,h = power_spectrum(x, p, nfft=nfft, window=window, zero_prepend=zero_prepend, zero_append=zero_append)
+    𝔽 = mel_filterbanks(T, p.rate, nfft, filt_num=filt_num, fl=fl, fh=fh)
     ℙ = 𝔽 * ℙ
-    use_log && (log.(ℙ))
+    use_log && (log.(ℙ+eps(T)))
     ℙ
 end
 
 
 
-# T could be AbstractFloat for best performance
-# but defined as Real for completeness.
+
 function local_maxima(x::AbstractArray{T,1}) where {T <: Real}
-    
+    # T could be AbstractFloat for best performance
+    # but defined as Real for completeness.    
     gtl = [false; x[2:end] .> x[1:end-1]]
     gtu = [x[1:end-1] .>= x[2:end]; false]
     imax = gtl .& gtu
@@ -381,10 +407,10 @@ end
 # 3. todo: remove allocations for better performance
 symm(i,r) = i-r:i+r
 
-# r: radius
-# t: noise estimation frames
-function sliding(x::Array{T,2}, r::Int64, t::Int64) where T <: AbstractFloat
 
+function sliding(x::Array{T,2}, r::Int64, t::Int64) where T <: AbstractFloat
+    # r: radius
+    # t: noise estimation frames
     m, n = size(x)
     head = repmat(x[:,1], 1, r)
     tail = repmat(x[:,end], 1, r)
@@ -418,31 +444,29 @@ rms(x) = sqrt(sum((x-mean(x)).^2)/length(x))
 
 
 function stft2(x::AbstractArray{T,1}, sz::Int64, hp::Int64, wn) where T <: AbstractFloat
-# filter bank with square-root hann window for hard/soft masking
-# short-time fourier transform
-# input:
-#     x    input time series
-#     sz   size of the fft
-#     hp   hop size in samples
-#     wn   window to use
-#     sr   sample rate
-# output:
-#     𝕏    complex STFT output (DC to Nyquist)
-#     h    unpacked sample length of the signal in time domain
-
-    p = Frame1D{Int64}(0, sz, hp, 0)
-    𝕏,h = spectrogram(x, p, sz, window=wn, zero_init=true)
+    # filter bank with square-root hann window for hard/soft masking
+    # short-time fourier transform
+    # input:
+    #     x    input time series
+    #     sz   size of the fft
+    #     hp   hop size in samples
+    #     wn   window to use
+    #     sr   sample rate
+    # output:
+    #     𝕏    complex STFT output (DC to Nyquist)
+    #     h    unpacked sample length of the signal in time domain
+    p = Frame1{Int64}(0, sz, hp, 0)
+    𝕏,h = spectrogram(x, p, window=wn, zero_prepend=true)
     𝕏,h
 end
 
 
 
 function stft2(𝕏::AbstractArray{Complex{T},2}, h::Int64, sz::Int64, hp::Int64, wn) where T <: AbstractFloat
-# input:
-#    𝕏   complex spectrogram (DC to Nyquist)
-#    h   unpacked sample length of the signal in time domain
-# output time series reconstructed
-
+    # input:
+    #    𝕏   complex spectrogram (DC to Nyquist)
+    #    h   unpacked sample length of the signal in time domain
+    # output time series reconstructed
     𝕎 = wn(T,sz) ./ (T(sz/hp))
     𝕏 = vcat(𝕏, conj!(𝕏[end-1:-1:2,:]))
     𝕏 = real(ifft(𝕏,1)) .* 𝕎
@@ -458,9 +482,9 @@ end
 
 
 function idealsoftmask_aka_oracle(x1,x2,fs)
-# Demo function    
-# x1,fs = WAV.wavread("D:\\Git\\dnn\\stft_example\\sound001.wav")
-# x2,fs = WAV.wavread("D:\\Git\\dnn\\stft_example\\sound002.wav")
+    # Demo function    
+    # x1,fs = WAV.wavread("D:\\Git\\dnn\\stft_example\\sound001.wav")
+    # x2,fs = WAV.wavread("D:\\Git\\dnn\\stft_example\\sound002.wav")
 
     x1 = view(x1,:,1)
     x2 = view(x2,:,1)
@@ -504,12 +528,8 @@ end
 
 
 
-function extract_symbol_and_merge(
-    x::AbstractArray{T,1}, 
-    s::AbstractArray{T,1}, 
-    rep::U;
-    vision=false
-    ) where {T <: AbstractFloat, U <: Integer}
+function extract_symbol_and_merge(x::AbstractArray{T,1}, s::AbstractArray{T,1}, rep::U;
+    vision=false) where {T <: AbstractFloat, U <: Integer}
     
     n = length(x) 
     m = length(s)

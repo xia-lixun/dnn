@@ -1,4 +1,4 @@
-module NEURAL
+module Neural
 # forward propagate through the neural net
 # decomposition/reconstrauction of the data under validation and test
 
@@ -38,16 +38,15 @@ end
 
 
 
-
 function feedforward(nn::Net{T}, x::AbstractArray{T,2}) where T <: AbstractFloat
-# Propagate the input data matrix through neural net
-# x is column major, i.e. each column is an input vector 
+    # Propagate the input data matrix through neural net
+    # x is column major, i.e. each column is an input vector 
 
-    a = FEATURE.sigmoid.(nn.weight[1] * x .+ nn.bias[1])
+    a = Fast.sigmoid.(nn.weight[1] * x .+ nn.bias[1])
     for i = 2 : nn.layers-1
-        a .= FEATURE.sigmoid.(nn.weight[i] * a .+ nn.bias[i])
+        a .= Fast.sigmoid.(nn.weight[i] * a .+ nn.bias[i])
     end
-    y = FEATURE.sigmoid.(nn.weight[nn.layers] * a .+ nn.bias[nn.layers])
+    y = Fast.sigmoid.(nn.weight[nn.layers] * a .+ nn.bias[nn.layers])
 end
 
 
