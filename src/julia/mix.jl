@@ -547,9 +547,17 @@ function feature(s::Specification, decomp_info; flag="train")
         ratiomask_dft_oracle = abs.(𝕏v) ./ (abs.(𝕏v) + abs.(𝕏n))
         ratiomask_mel_oracle = (mel.filter * ratiomask_dft_oracle) .* mel.weight
         magnitude_dft = abs.(𝕏m)
-        # magnitude_mel = (mel.filter * magnitude_dft) .* mel.weight
-        magnitude_mel = log.(mel.filter * magnitude_dft + eps())
 
+        # ------------------------------------------------------------
+        # magnitude_mel = (mel.filter * magnitude_dft) .* mel.weight
+        #
+        # obs!
+        # we don't apply mel.weight to the feature as it attenuates 
+        # high-freq energy; log feature seems to work better than 
+        # linear feature        
+        # ------------------------------------------------------------
+
+        magnitude_mel = log.(mel.filter * magnitude_dft + eps())
         MAT.matwrite(
             joinpath(spectrum_dir, basename(i[1:end-4]*".mat")), 
             Dict(

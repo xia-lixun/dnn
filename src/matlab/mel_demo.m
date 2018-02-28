@@ -18,7 +18,7 @@ plot(ratiomask_lin_2, 'k--');
 %%
 load('1+Air conditioning+m025wky1+I-nVcl1UdE4+dr3+mjvw0+sx113+-42.0+15.0.mat')
 ratiomask_lin = ratiomask_dft(:,800);
-b = filter_banks(16000, 512, 136, 0, 16000/2);
+b = filter_banks(16000, 512, 73, 0, 16000/2);
 ratiomask_mel = (b * ratiomask_lin) ./ sum(b,2);
 figure; plot(ratiomask_mel, 'r'); 
 
@@ -29,8 +29,8 @@ plot(ratiomask_lin, 'b--');
 
 
 %%
-spectrum_mel = spectrum(:,800);
-spectrum_mel = spectrum_mel ./ sum(b,2);
-figure; plot(spectrum_mel, 'r');  hold on; grid on;
-plot(b.' * spectrum_mel, 'b');
-
+ratiomask_lin_noise = 1 - ratiomask_lin;
+ratiomask_mel_noise = (b * ratiomask_lin_noise) ./ sum(b,2);
+figure; hold on; grid on; 
+plot(ratiomask_mel_noise, 'r');
+plot(1 - ratiomask_mel, 'b--');

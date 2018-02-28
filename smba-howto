@@ -1,0 +1,18 @@
+### SMBA setting
+> sudo apt install samba  
+> sudo gedit /etc/samba/smb.conf &  
+
+> [share]  
+>comment = Ubuntu File Server Share  
+>path = /path/to/the/folder  
+>browsable = yes  
+>guest ok = yes  
+>read only = no  
+>writeable = yes  
+
+> sudo chmod -R 777 /path/to/the/folder  
+> sudo service smbd restart  
+> sudo service nmbd restart  
+
+Don't forget to install ssh server:
+>sudo apt install openssh-server
