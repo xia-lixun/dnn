@@ -589,7 +589,24 @@ end
 
 
 
+function speech_weight(s::Specification)
+    # go through all speech samples for weight statistics
+    wav_list = FileSystem.list(s.root_speech, t=".wav")
+    nframes = 0
+    mel = Mel{Float64}(s)
+    y = zeros(size(mel.filter,1),1)
 
+    for w in wav_list
+        x, sr = WAV.wavread(w)
+        x = view(x,:,1)
+        𝕏, h = Fast.stft2(x, s.feature["frame_length"], s.feature["hop_length"], Fast.sqrthann)
+        nframes += size(𝕏,2)
+        y .+= sum(mel.filter * abs.(𝕏), 2)
+    end
+    y = y / nframes
+    y = y / sum(y)
+    MAT.matwrite(joinpath(s.root_speech, "spweight.mat"),Dict("ratio"=>Float32.(y)))
+end
 
 
 function statistics(s::Specification; flag = "train")
