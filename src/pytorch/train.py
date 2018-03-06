@@ -59,7 +59,7 @@ path_train = '/home/coc/Public/train/tensor/'
 path_test = '/home/coc/Public/test/tensor/'
 path_model = '/home/coc/Public/model-pytorch.mat'
 path_weight = '/home/coc/Public/spweight.mat'
-
+path_logger = '/home/coc/Public/loss.log'
 
 
 def loadmat_transpose(path):
@@ -146,48 +146,30 @@ class Net(nn.Module):
 
     def __init__(self):
         super(Net, self).__init__()
-        # an affine operation: y = Wx + b
         self.fc1 = nn.Linear(input_dim, hidden_dim)
-        self.bn1 = nn.BatchNorm1d(hidden_dim, momentum=0.001, eps = 1e-6) # affine=True,track_running_stats=True
-        
+        self.bn1 = nn.BatchNorm1d(hidden_dim, affine=False, momentum=0.1) # track_running_stats=True
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        self.bn2 = nn.BatchNorm1d(hidden_dim, momentum=0.001, eps = 1e-6)
-        
+        self.bn2 = nn.BatchNorm1d(hidden_dim, affine=False, momentum=0.1)
         self.fc3 = nn.Linear(hidden_dim, hidden_dim)
-        self.bn3 = nn.BatchNorm1d(hidden_dim, momentum=0.001, eps = 1e-6)
-
-        self.fc4 = nn.Linear(hidden_dim, hidden_dim)
-        self.bn4 = nn.BatchNorm1d(hidden_dim, momentum=0.001, eps = 1e-6)
-
-        self.fc5 = nn.Linear(hidden_dim, hidden_dim)
-        self.bn5 = nn.BatchNorm1d(hidden_dim, momentum=0.001, eps = 1e-6)
-
-        self.fc6 = nn.Linear(hidden_dim, output_dim)
-        self.bn6 = nn.BatchNorm1d(output_dim, momentum=0.001, eps = 1e-6)
+        self.bn3 = nn.BatchNorm1d(hidden_dim, affine=False, momentum=0.1)
+        self.fc4 = nn.Linear(hidden_dim, output_dim)
         # self.dp1 = nn.Dropout(p=dropout_prob)
 
         nn.init.xavier_normal(self.fc1.weight)
         nn.init.xavier_normal(self.fc2.weight)
         nn.init.xavier_normal(self.fc3.weight)
         nn.init.xavier_normal(self.fc4.weight)
-        nn.init.xavier_normal(self.fc5.weight)
-        nn.init.xavier_normal(self.fc6.weight)
-
         nn.init.constant(self.fc1.bias, 0.0)
         nn.init.constant(self.fc2.bias, 0.0)
         nn.init.constant(self.fc3.bias, 0.0)
         nn.init.constant(self.fc4.bias, 0.0)
-        nn.init.constant(self.fc5.bias, 0.0)
-        nn.init.constant(self.fc6.bias, 0.0)
 
     def forward(self, x):
-        x = F.sigmoid(self.bn1(self.fc1(x)))
+        x = self.bn1(F.sigmoid(self.fc1(x)))
         # x = self.dp1(x)
-        x = F.sigmoid(self.bn2(self.fc2(x)))
-        x = F.sigmoid(self.bn3(self.fc3(x)))
-        x = F.sigmoid(self.bn4(self.fc4(x)))
-        x = F.sigmoid(self.bn5(self.fc5(x)))
-        x = self.bn6(self.fc6(x))
+        x = self.bn2(F.sigmoid(self.fc2(x)))
+        x = self.bn3(F.sigmoid(self.fc3(x)))
+        x = self.fc4(x)
         return x
 
 
@@ -204,7 +186,6 @@ optimizer = optim.SGD(model.parameters(), lr=learn_rate_init, momentum=momentum_
 spweight = loadmat_transpose(path_weight)
 spweight = torch.from_numpy(spweight['ratio'][0] * 100).cuda()
 criterion = nn.MultiLabelSoftMarginLoss(weight=spweight).cuda()
-
 
 
 
@@ -328,8 +309,11 @@ def adjust_learnrate(epoch):
 test_loss_min = 1000000.0
 test_loss = test()
 print('[init]: validation loss = %.3f ' % (test_loss))
+with open(path_logger, 'w') as textfile:
+    textfile.write("%f,%f\n"%(-1.0, test_loss))
 
 for epoch in range(1,1+n_epochs):
+
     adjust_learnrate(epoch)
 
     t_init = time.time()
@@ -344,25 +328,19 @@ for epoch in range(1,1+n_epochs):
         model_param_stat = {}
         for k,p in enumerate(model.parameters()):
             model_param_stat['param_'+str(k+1)] = p.data.cpu().numpy()
-    
         model_param_stat['stats_bn1_mean'] = model.bn1.running_mean.cpu().numpy()
         model_param_stat['stats_bn2_mean'] = model.bn2.running_mean.cpu().numpy()
         model_param_stat['stats_bn3_mean'] = model.bn3.running_mean.cpu().numpy()
-        model_param_stat['stats_bn4_mean'] = model.bn4.running_mean.cpu().numpy()
-        model_param_stat['stats_bn5_mean'] = model.bn5.running_mean.cpu().numpy()
-        model_param_stat['stats_bn6_mean'] = model.bn6.running_mean.cpu().numpy()
-
         model_param_stat['stats_bn1_var'] = model.bn1.running_var.cpu().numpy()
         model_param_stat['stats_bn2_var'] = model.bn2.running_var.cpu().numpy()
         model_param_stat['stats_bn3_var'] = model.bn3.running_var.cpu().numpy()
-        model_param_stat['stats_bn4_var'] = model.bn4.running_var.cpu().numpy()
-        model_param_stat['stats_bn5_var'] = model.bn5.running_var.cpu().numpy()
-        model_param_stat['stats_bn6_var'] = model.bn6.running_var.cpu().numpy()
         
         scio.savemat(path_model, model_param_stat)
         test_loss_min = test_loss
         print('[epoch %d] +' % (epoch))
 
+    with open(path_logger, "a") as textfile:
+        textfile.write("%f,%f\n"%(train_loss, test_loss))
 
 
 

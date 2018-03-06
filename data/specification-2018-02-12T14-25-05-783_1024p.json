@@ -1,0 +1,83 @@
+{
+    "speech_level_db": [
+        -22.0,
+        -32.0,
+        -42.0
+    ],
+    "root_noise": "D:\\oak\\noise_google_audio_set\\no_speech\\",
+    "feature": {
+        "nat_frames": 15,
+        "context_frames": 31,
+        "frame_length": 1024,
+        "hop_length": 256,
+        "mel_bands": 136
+    },
+    "noise_groups": [
+        {
+            "name": "Accelerating, revving, vroom",
+            "percent": 10.0,
+            "type": "stationary"
+        },
+        {
+            "name": "Air brake",
+            "percent": 10.0,
+            "type": "stationary"
+        },
+        {
+            "name": "Air conditioning",
+            "percent": 10.0,
+            "type": "stationary"
+        },
+        {
+            "name": "Air horn, truck horn",
+            "percent": 10.0,
+            "type": "stationary"
+        },
+        {
+            "name": "Aircraft",
+            "percent": 10.0,
+            "type": "stationary"
+        },
+        {
+            "name": "Aircraft engine",
+            "percent": 10.0,
+            "type": "stationary"
+        },
+        {
+            "name": "Alarm",
+            "percent": 10.0,
+            "type": "stationary"
+        },
+        {
+            "name": "Alarm clock",
+            "percent": 10.0,
+            "type": "stationary"
+        },
+        {
+            "name": "Ambulance (siren)",
+            "percent": 10.0,
+            "type": "stationary"
+        },
+        {
+            "name": "Applause",
+            "percent": 10.0,
+            "type": "stationary"
+        }
+    ],
+    "speech_noise_time_ratio": 0.6,
+    "root_speech": "D:\\oak\\speech_timit_lp7\\",
+    "test_seconds": 7200,
+    "train_seconds": 14400,
+    "random_seed": 65537,
+    "sample_rate": 16000,
+    "train_test_split_ratio": 0.7,
+    "snr": [
+        20.0,
+        15.0,
+        10.0,
+        5.0,
+        0.0,
+        -5.0
+    ],
+    "root_mix": "D:\\2-Workspace\\"
+}
