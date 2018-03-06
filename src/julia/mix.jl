@@ -22,6 +22,7 @@ struct Specification
     root_mix::String
     root_speech::String
     root_noise::String
+    root_tensor::String
 
     sample_rate::Int64
     dbspl::Array{Float64,1}
@@ -45,7 +46,7 @@ struct Specification
         end
         assert(99.9 < sum_percent < 100.1)
         new(
-            s["random_seed"],s["root_mix"],s["root_speech"],s["root_noise"],
+            s["random_seed"],s["root_mix"],s["root_speech"],s["root_noise"],s["root_tensor"],
             s["sample_rate"],s["speech_level_db"],s["snr"],
             s["speech_noise_time_ratio"],s["train_test_split_ratio"],
             s["train_seconds"],s["test_seconds"],
@@ -88,6 +89,7 @@ function generate_specification(path_mix::String, path_speech::String, path_nois
         "root_mix" => path_mix,
         "root_speech" => path_speech,
         "root_noise" => path_noise,
+        "root_tensor" => "\\172.20.20.20\\share\\",
         "sample_rate" => 16000,
         "speech_level_db" => [-22.0, -32.0, -42.0],
         "snr" => [20.0, 15.0, 10.0, 5.0, 0.0, -5.0],
@@ -705,9 +707,9 @@ end
 
 function tensor(s::Specification; flag="train")
     # return: nothing
-    # side-effect: write tensors to /flag/tensor/*.mat
+    # side-effect: write tensors to root_tensor/flag/*.mat
 
-    tensor_dir = joinpath(s.root_mix, flag, "tensor")
+    tensor_dir = joinpath(s.root_tensor, flag, "tensor")
     rm(tensor_dir, force=true, recursive=true)
     mkpath(tensor_dir)
     
