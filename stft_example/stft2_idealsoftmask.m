@@ -46,3 +46,27 @@ figure;plot(x1);hold on;grid on;plot(y1,'r');plot(y1-x1,'k')
 figure;plot(x2);hold on;grid on;plot(y2,'r');plot(y2-x2,'k')
 10*log10(sum(abs(x2-y2).^2)/sum(x2.^2))
 
+%%
+% phase sensitive mask
+% a = s/y in complex domain, since a belongs to comlex, we desire real mask
+% Re(a) = Re(s/y) = |a|/|y| Re(exp(i(thera_s - theta_y))) 
+%       = |a|/|y| cos(theta)
+nFFT = 1024;
+hop = 256;
+win = sqrt( hann( nFFT, 'periodic')); % hann window
+mixSpec = stft2(x, nFFT,hop,0,win);
+x1Spec  = stft2(x1,nFFT,hop,0,win);
+x2Spec  = stft2(x2,nFFT,hop,0,win);
+
+psm = real(x1Spec ./ (x1Spec+x2Spec));
+y1Spec = psm.*mixSpec;
+
+scale = 2; %stft2.m reconstruction always needs a scale factor of 2.
+y  = stft2(mixSpec,nFFT,hop,0,win)*scale;
+y1 = stft2(y1Spec,nFFT,hop,0,win)*scale;
+y = y(1:M);
+y1 = y1(1:M);
+
+10*log10(sum(abs(x-y).^2)/sum(x.^2))
+figure;plot(x1);hold on;grid on;plot(y1,'r');plot(y1-x1,'k')
+10*log10(sum(abs(x1-y1).^2)/sum(x1.^2))

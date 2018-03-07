@@ -546,7 +546,11 @@ function feature(s::Specification, decomp_info; flag="train")
         𝕏v, h = Fast.stft2(x_purevoice, s.feature["frame_length"], s.feature["hop_length"], Fast.sqrthann)
         𝕏n, h = Fast.stft2(x_purenoise, s.feature["frame_length"], s.feature["hop_length"], Fast.sqrthann)
         
-        ratiomask_dft_oracle = abs.(𝕏v) ./ (abs.(𝕏v) + abs.(𝕏n))
+        #@ ratiomask_dft_oracle = abs.(𝕏v) ./ (abs.(𝕏v) + abs.(𝕏n))
+        ratiomask_dft_oracle = real(𝕏v ./ (𝕏v + 𝕏n))
+        ratiomask_dft_oracle[ratiomask_dft_oracle .> 1.0] = 1.0
+        ratiomask_dft_oracle[ratiomask_dft_oracle .< -1.0] = -1.0
+
         ratiomask_mel_oracle = (mel.filter * ratiomask_dft_oracle) .* mel.weight
         magnitude_dft = abs.(𝕏m)
 

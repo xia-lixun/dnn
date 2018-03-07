@@ -18,7 +18,7 @@ struct Net{T <: AbstractFloat}
     width_hidden::Int64
     width_output::Int64
     bn_mean::Array{Array{T,2},1}
-    bn_var::Array{Array{T,2},1}
+    bn_stdv::Array{Array{T,2},1}
 
     function Net{T}(path::String) where T <: AbstractFloat
 
@@ -27,7 +27,7 @@ struct Net{T <: AbstractFloat}
         w = Array{Array{T,2},1}(layers)
         b = Array{Array{T,2},1}(layers)
         stats_mean = Array{Array{T,2},1}(layers-1)
-        stats_var = Array{Array{T,2},1}(layers-1)
+        stats_stdv = Array{Array{T,2},1}(layers-1)
 
         for i = 0:layers-1
             w[i+1] = nn["param_$(2i+1)"]            # (hidden_width, input_width)
@@ -39,9 +39,9 @@ struct Net{T <: AbstractFloat}
 
         for i = 1:layers-1
             stats_mean[i] = transpose(nn["stats_bn$(i)_mean"])
-            stats_var[i] = transpose(nn["stats_bn$(i)_var"])
+            stats_stdv[i] = sqrt.(transpose(nn["stats_bn$(i)_var"]) + 1e-5)
         end
-        new(layers, w, b, width_i, width_h, width_o, stats_mean, stats_var)
+        new(layers, w, b, width_i, width_h, width_o, stats_mean, stats_stdv)
     end 
 end
 
@@ -53,10 +53,10 @@ function feedforward(nn::Net{T}, x::AbstractArray{T,2}) where T <: AbstractFloat
     # x is column major, i.e. each column is an input vector 
 
     a = Fast.sigmoid.(nn.weight[1] * x .+ nn.bias[1])
-    a .= (a .- nn.bn_mean[1])./sqrt.(nn.bn_var[1].+1e-5)
+    a .= (a .- nn.bn_mean[1]) ./ (nn.bn_stdv[1])
     for i = 2 : nn.layers-1
         a .= Fast.sigmoid.(nn.weight[i] * a .+ nn.bias[i])
-        a .= (a .- nn.bn_mean[i])./sqrt.(nn.bn_var[i].+1e-5)
+        a .= (a .- nn.bn_mean[i]) ./ (nn.bn_stdv[i])
     end
     y = Fast.sigmoid.(nn.weight[nn.layers] * a .+ nn.bias[nn.layers])
 end
