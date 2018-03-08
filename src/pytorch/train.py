@@ -54,7 +54,7 @@ from sklearn.model_selection import train_test_split
 
 
 
-
+print(torch.__version__)
 path_train = '/home/coc/Public/train/tensor/'
 path_test = '/home/coc/Public/test/tensor/'
 path_model = '/home/coc/Public/model-pytorch.mat'
@@ -105,13 +105,13 @@ train_partitions = int(train_bytes // (mem_available * mem_util_ratio * 0.5)) + 
 print('[init]: train, %f MiB in %d partitions'%(train_bytes/1024/1024, train_partitions))
 print('[init]: test, %f MiB in %d partitions'%(test_bytes/1024/1024, test_partitions))
 
-# GPU memory utillization
+
 gpu_mem_available = 11*1024*1024*1024
 gpu_mem_util_ratio = 0.3
 test_batch_partitions = int((test_bytes/test_partitions) // (gpu_mem_available * gpu_mem_util_ratio)) + 1
 print('[init]: test, %d GPU partitions for each CPU partition'%(test_batch_partitions))
 
-# find out the tensor dimensions
+
 tensor = loadmat_transpose(os.path.join(path_train, 't_1.mat'))
 input_dim = tensor['variable'].shape[1]
 output_dim = tensor['label'].shape[1]
@@ -186,6 +186,7 @@ optimizer = optim.SGD(model.parameters(), lr=learn_rate_init, momentum=momentum_
 spweight = loadmat_transpose(path_weight)
 spweight = torch.from_numpy(spweight['ratio'][0] * 100).cuda()
 criterion = nn.MultiLabelSoftMarginLoss(weight=spweight).cuda()
+
 
 
 

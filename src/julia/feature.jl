@@ -428,6 +428,7 @@ end
 
 
 sigmoid(x::T) where T <: AbstractFloat = one(T) / (one(T) + exp(-x))
+sigmoidinv(x::T) where T <: AbstractFloat = log(x / (one(T)-x))  # x ∈ (0, 1)
 rms(x,dim) = sqrt.(sum((x.-mean(x,dim)).^2,dim)/size(x,dim))
 rms(x) = sqrt(sum((x-mean(x)).^2)/length(x))
 
