@@ -719,7 +719,10 @@ function tensor(s::Specification; flag="train")
     for i in FileSystem.list(joinpath(s.root_mix, flag, "spectrum"), t=".mat")
 
         data = MAT.matread(i)
-        variable = Float32.(Fast.sliding(data["spectrum_mel"], div(s.feature["context_frames"]-1,2), s.feature["nat_frames"]))
+        variable = Float32.(Fast.sliding_aperture(
+            data["spectrum_mel"], 
+            div(s.feature["context_frames"]-1,2), 
+            s.feature["nat_frames"]))
         label = Float32.(data["ratiomask_mel"])
 
         index = split(basename(i),"+")
@@ -797,7 +800,7 @@ function ratiomask_inference(
     ) where T <: AbstractFloat
 
     mag_dft = log.(abs.(𝕏) + eps(T))
-    mag_tensor = Fast.sliding(mag_dft, div(s.feature["context_frames"]-1,2), s.feature["nat_frames"])
+    mag_tensor = Fast.sliding_aperture(mag_dft, div(s.feature["context_frames"]-1,2), s.feature["nat_frames"])
     ratiomask = Neural.feedforward(nn, mag_tensor)
 end
 
@@ -810,7 +813,7 @@ function ratiomask_inference(
     ) where T <: AbstractFloat
 
     mag_mel = log.(mel.filter * abs.(𝕏) + eps(T))
-    mag_tensor = Fast.sliding(mag_mel, div(s.feature["context_frames"]-1,2), s.feature["nat_frames"])
+    mag_tensor = Fast.sliding_aperture(mag_mel, div(s.feature["context_frames"]-1,2), s.feature["nat_frames"])
     ratiomask_mel = Neural.feedforward(nn, mag_tensor)
     ratiomask = mel.filter_t * ratiomask_mel
 end

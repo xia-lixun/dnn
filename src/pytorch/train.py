@@ -102,8 +102,8 @@ train_files, train_bytes = dataset_size(path_train)
 
 test_partitions = int(test_bytes // (mem_available * mem_util_ratio)) + 1
 train_partitions = int(train_bytes // (mem_available * mem_util_ratio * 0.5)) + 1
-print('[init]: train, %f MiB in %d partitions'%(train_bytes/1024/1024, train_partitions))
-print('[init]: test, %f MiB in %d partitions'%(test_bytes/1024/1024, test_partitions))
+print('[init]: train, %f MiB in %d CPU partitions'%(train_bytes/1024/1024, train_partitions))
+print('[init]: test, %f MiB in %d CPU partitions'%(test_bytes/1024/1024, test_partitions))
 
 
 gpu_mem_available = 11*1024*1024*1024

@@ -408,21 +408,29 @@ end
 symm(i,r) = i-r:i+r
 
 
-function sliding(x::Array{T,2}, r::Int64, t::Int64) where T <: AbstractFloat
+function sliding_aperture(x::Array{T,2}, r::Int64, t::Int64) where T <: AbstractFloat
     # r: radius
     # t: noise estimation frames
     m, n = size(x)
     head = repmat(x[:,1], 1, r)
     tail = repmat(x[:,end], 1, r)
     x = hcat(head, x, tail)
-    y = zeros(T, (2r+2)*m, n)
 
-    for i = 1:n
-        focus = view(x,:,symm(r+i,r))
-        nat = sum(view(focus,:,1:t), 2) / t
-        y[:,i] = vec(hcat(focus,nat))
+    if t > 0
+        y = zeros(T, (2r+2)*m, n)
+        for i = 1:n
+            focus = view(x,:,symm(r+i,r))
+            nat = mean(view(focus,:,1:t), 2)
+            y[:,i] = vec(hcat(focus,nat))
+        end
+        return y
+    else
+        y = zeros(T, (2r+1)*m, n)
+        for i = 1:n
+            y[:,i] = vec(view(x,:,symm(r+i,r)))
+        end
+        return y
     end
-    y
 end
 
 
