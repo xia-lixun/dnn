@@ -10,3 +10,14 @@ $ git commit [-a] -c ORIG_HEAD                              (5)
 [2] git pull remote branch to local: need to make local track
 
 $ git checkout --track origin:dev1222
+
+
+[3] undo uncommited files
+$ git reset --hard
+$ git clean -fd
+
+
+[4] merge branches
+$ git checkout master
+$ git merge dev1222
+$ git branch -d dev1222  only if you delete the branch
