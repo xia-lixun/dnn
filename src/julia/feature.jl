@@ -184,27 +184,26 @@ sqrthann(T,n) = sqrt.(hann(T,n,flag="periodic"))
 
 
 
-struct Frame1{T <: Integer}
-    # immutable type definition
-    # note that Frame1{Int16}(1024.0, 256.0, 0) is perfectly legal as new() will convert every parameter to T
-    # but Frame1{Int16}(1024.0, 256.3, 0) would not work as it raises InexactError()
-    # also note that there is not white space between Frame1 and {T <: Integer}
-    samplerate::T
-    block::T
-    update::T
-    overlap::T
-    Frame1{T}(r, x, y, z) where {T <: Integer} = x < y ? error("block size must ≥ update size!") : new(r, x, y, x-y)
+struct Frame1
+    # note Frame1(8000, 1024.0, 256.0, 0) is perfectly legal as new() will convert every parameter to T
+    # but Frame1(8000, 1024.0, 256.3, 0) would not work as it raises InexactError()
+    samplerate::Int64
+    block::Int64
+    update::Int64
+    overlap::Int64
+    Frame1(r, x, y, z) = x < y ? error("block size must ≥ update size!") : new(r, x, y, x-y)
     # we define an outer constructor as the inner constructor infers the overlap parameter
     # again the block and update accepts Integers as well as AbstractFloat w/o fractions
     #
     # example type outer constructors: 
-    # FrameInSample(fs, block, update) = Frame1{Int64}(fs, block, update, 0)
-    # FrameInSecond(fs, block, update) = Frame1{Int64}(fs, floor(block * fs), floor(update * fs), 0)
+    # FrameInSample(fs, block, update) = Frame1(fs, block, update, 0)
+    # FrameInSecond(fs, block, update) = Frame1(fs, floor(block * fs), floor(update * fs), 0)
+    # Frame1(0, 1024, 256, 0)
 end
 
 
 
-function tile(x::AbstractArray{T,1}, p::Frame1{U}; zero_prepend=false, zero_append=false) where {T <: AbstractFloat, U <: Integer}
+function tile(x::AbstractArray{T,1}, p::Frame1; zero_prepend=false, zero_append=false) where {T <: AbstractFloat}
     # extend array x with prefix/appending zeros for frame slicing
     # this is an utility function used by getframes(),spectrogram()...
     # new data are allocated, so origianl x is untouched.
@@ -228,8 +227,8 @@ end
 
 
 
-function getframes(x::AbstractArray{T,1}, p::Frame1{U}; 
-    window=ones, zero_prepend=false, zero_append=false) where {T <: AbstractFloat, U <: Integer}
+function getframes(x::AbstractArray{T,1}, p::Frame1; 
+    window=ones, zero_prepend=false, zero_append=false) where {T <: AbstractFloat}
     # function    : getframes
     # x           : array of AbstractFloat {Float64, Float32, Float16, BigFloat}
     # p           : frame size immutable struct
@@ -238,7 +237,7 @@ function getframes(x::AbstractArray{T,1}, p::Frame1{U};
     # 
     # example:
     # x = collect(1.0:100.0)
-    # p = Frame1{Int64}(8000, 17, 7.0, 0)
+    # p = Frame1(8000, 17, 7.0, 0)
     # y,h = getframes(x, p) where h is the unfold length in time domain    
 
     x, n = tile(x, p, zero_prepend = zero_prepend, zero_append = zero_append)
@@ -254,11 +253,11 @@ function getframes(x::AbstractArray{T,1}, p::Frame1{U};
 end
 
 
-function spectrogram(x::AbstractArray{T,1}, p::Frame1{U}; 
-    nfft = p.block, window=ones, zero_prepend=false, zero_append=false) where {T <: AbstractFloat, U <: Integer}
+function spectrogram(x::AbstractArray{T,1}, p::Frame1; 
+    nfft = p.block, window=ones, zero_prepend=false, zero_append=false) where {T <: AbstractFloat}
     # example:
     # x = collect(1.0:100.0)
-    # p = Frame1{Int64}(8000, 17, 7.0, 0)
+    # p = Frame1(8000, 17, 7.0, 0)
     # y,h = spectrogram(x, p, window=hamming, zero_prepend=true, zero_append=true) 
     # where h is the unfold length in time domain    
 
@@ -291,8 +290,8 @@ intensity(v) = abs.(v)
 zero_crossing_rate(v) = floor.((abs.(diff(sign.(v)))) ./ 2)
 
 
-function short_term(f, x::AbstractArray{T,1}, p::Frame1{U}; 
-    zero_prepend=false, zero_append=false) where {T <: AbstractFloat, U <: Integer}
+function short_term(f, x::AbstractArray{T,1}, p::Frame1; 
+    zero_prepend=false, zero_append=false) where {T <: AbstractFloat}
 
     frames, lu = getframes(x, p, zero_prepend=zero_prepend, zero_append=zero_append)
     n = size(frames,2)
@@ -311,8 +310,8 @@ mel_to_hz(mel) = 700 * (10 .^ (mel * 1.0 / 2595) - 1)
 
 
 
-function power_spectrum(x::AbstractArray{T,1}, p::Frame1{U}; 
-    nfft = p.block, window=ones, zero_prepend=false, zero_append=false) where {T <: AbstractFloat, U <: Integer}
+function power_spectrum(x::AbstractArray{T,1}, p::Frame1; 
+    nfft = p.block, window=ones, zero_prepend=false, zero_append=false) where {T <: AbstractFloat}
     # calculate power spectrum of 1-D array on a frame basis
     # note that T=Float16 may not be well supported by FFTW backend
 
@@ -374,8 +373,8 @@ function mel_filterbanks(T, rate::U, nfft::U; filt_num=26, fl=0, fh=div(rate,2))
 end
 
 
-function filter_bank_energy(x::AbstractArray{T,1}, p::Frame1{U}; 
-    nfft = p.block, window=ones, zero_prepend=false, zero_append=false, filt_num=26, fl=0, fh=div(p.rate,2), use_log=false) where {T <: AbstractFloat, U <: Integer}
+function filter_bank_energy(x::AbstractArray{T,1}, p::Frame1; 
+    nfft = p.block, window=ones, zero_prepend=false, zero_append=false, filt_num=26, fl=0, fh=div(p.rate,2), use_log=false) where {T <: AbstractFloat}
 
     ℙ,h = power_spectrum(x, p, nfft=nfft, window=window, zero_prepend=zero_prepend, zero_append=zero_append)
     𝔽 = mel_filterbanks(T, p.rate, nfft, filt_num=filt_num, fl=fl, fh=fh)
@@ -464,7 +463,7 @@ function stft2(x::AbstractArray{T,1}, sz::Int64, hp::Int64, wn) where T <: Abstr
     # output:
     #     𝕏    complex STFT output (DC to Nyquist)
     #     h    unpacked sample length of the signal in time domain
-    p = Frame1{Int64}(0, sz, hp, 0)
+    p = Frame1(0, sz, hp, 0)
     𝕏,h = spectrogram(x, p, window=wn, zero_prepend=true)
     𝕏,h
 end
@@ -614,6 +613,37 @@ function signal_to_distortion_ratio(x::AbstractArray{T,1}, t::AbstractArray{T,1}
     y,diffpeak = extract_symbol_and_merge(x, t, 1)
     10log10.(sum(t.^2, 1) ./ sum((t-y).^2, 1))
 end
+
+
+
+
+
+function noise_estimate_invoke(p::Frame1, tau_be, c_inc_db, c_dec_db, noise_init_db, min_noise_db, 𝕏::AbstractArray{Complex{T},2}) where {T <: AbstractFloat}
+
+    fs::Int64 = p.samplerate
+    h::Int64 = p.update
+    m::Int64 = div(p.block,2)+1
+    n = size(𝕏,2)
+
+    alpha_be = T(exp((-5h)/(tau_be*fs))) 
+    c_inc = T(10.0^(h*(c_inc_db/20)/fs))
+    c_dec = T(10.0^-(h*(c_dec_db/20)/fs))
+    band_energy = zeros(T,m,n+1)
+    band_noise = T(10.0^(noise_init_db/20))*ones(T,m,n+1)
+    min_noise = T(10.0^(min_noise_db/20))
+
+    for i = 1:n
+        band_energy[:,i+1] = alpha_be * view(band_energy,:,i) + (one(T)-alpha_be) * abs.(view(𝕏,:,i))
+        for k = 1:m
+            band_energy[k,i+1] > band_noise[k,i] && (band_noise[k,i+1] = c_inc * band_noise[k,i])
+            band_energy[k,i+1] <= band_noise[k,i] && (band_noise[k,i+1] = c_dec * band_noise[k,i])
+            band_energy[k,i+1] < min_noise && (band_energy[k,i+1] = min_noise)
+        end
+    end
+    band_noise = band_noise[:,2:end]
+end
+
+
 
 
 end # module

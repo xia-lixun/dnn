@@ -556,7 +556,6 @@ function feature(s::Specification, decomp_info; flag="train")
         # ------------------------------------------------------------
         # magnitude_mel = (mel.filter * magnitude_dft) .* mel.weight
         #
-        # obs!
         # we don't apply mel.weight to the feature as it attenuates 
         # high-freq energy; log feature seems to work better than 
         # linear feature        
@@ -565,11 +564,7 @@ function feature(s::Specification, decomp_info; flag="train")
         magnitude_mel = log.(mel.filter * magnitude_dft + eps())
         MAT.matwrite(
             joinpath(spectrum_dir, basename(i[1:end-4]*".mat")), 
-            Dict(
-                # "ratiomask_dft"=>ratiomask_dft_oracle,
-                "ratiomask_mel"=>ratiomask_mel_oracle,
-                # "spectrum_dft"=>magnitude_dft,
-                "spectrum_mel"=>magnitude_mel)
+            Dict("ratiomask_mel"=>ratiomask_mel_oracle, "spectrum_mel"=>magnitude_mel)
         )
 
         # oracle performance
@@ -610,7 +605,7 @@ function speech_weight(s::Specification)
     end
     y = y / nframes
     y = y / sum(y)
-    MAT.matwrite(joinpath(s.root_speech, "spweight.mat"),Dict("ratio"=>Float32.(y)))
+    MAT.matwrite(joinpath(s.root_speech, "spweight-dft1024.mat"),Dict("ratio"=>Float32.(y)))
 end
 
 
