@@ -9,7 +9,7 @@ include("visual.jl")
 
 
 
-# Deprecated! -> randstring()
+# Deprecated. use randstring() instead!
 # function rand_alphanum(n::Int64)
 #     an = collect("0123456789_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
 #     x = Array{Char,1}(n)
@@ -44,13 +44,13 @@ function checksum(list::Array{String,1})
     
     d = zeros(UInt8, 32)
     n = length(list)
-    p = Visual.ProgressBar(10)
+    # p = Visual.ProgressBar(10)
     
     for (i, j) in enumerate(list)
         d .+= open(j) do f
             SHA.sha256(f)
         end
-        Visual.update(p, i, n)
+        # Visual.update(p, i, n)
     end
     d
 end
@@ -66,7 +66,6 @@ end
     
     
 function update_checksum(path::String)
-    
     p = joinpath(path, "index.sha256")
     writedlm(p, checksum(list(path, t = ".wav")))
     info("checksum updated in $p")
@@ -74,7 +73,6 @@ function update_checksum(path::String)
 end
 
 function verify_checksum(path::String)
-    
     p = view(readdlm(joinpath(path, "index.sha256"), UInt8), :, 1)
     q = checksum(list(path, t = ".wav"))
     ok = (0x0 == sum(p - q))

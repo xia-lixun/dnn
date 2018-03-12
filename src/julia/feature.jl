@@ -538,7 +538,7 @@ end
 
 
 function extract_symbol_and_merge(x::AbstractArray{T,1}, s::AbstractArray{T,1}, rep::U;
-    vision=false) where {T <: AbstractFloat, U <: Integer}
+    vision=false, verbose=false) where {T <: AbstractFloat, U <: Integer}
     
     n = length(x) 
     m = length(s)
@@ -546,7 +546,7 @@ function extract_symbol_and_merge(x::AbstractArray{T,1}, s::AbstractArray{T,1}, 
     peaks = zeros(Int64, rep)
 
     ℝ = xcorr(s, x)
-    info("peak value: $(maximum(ℝ))")                              
+    verbose && info("peak value: $(maximum(ℝ))")                              
     vision && (box = plot(x, size=(800,200)))
     
     𝓡 = sort(ℝ[local_maxima(ℝ)], rev = true)
@@ -556,12 +556,12 @@ function extract_symbol_and_merge(x::AbstractArray{T,1}, s::AbstractArray{T,1}, 
     # find the anchor point
     ploc = find(z->z==𝓡[1],ℝ)[1]
     peaks[1] = ploc
-    info("peak anchor-[1] in correlation: $ploc")
+    verbose && info("peak anchor-[1] in correlation: $ploc")
     lb = n - ploc + 1
     rb = min(lb + m - 1, length(x))
     y[1:1+rb-lb] = x[lb:rb]
     ip = 1
-    1+rb-lb < m && warn("incomplete segment extracted!")
+    verbose && (1+rb-lb < m) && warn("incomplete segment extracted!")
 
     if vision
         box_hi = maximum(x[lb:rb])
@@ -579,7 +579,7 @@ function extract_symbol_and_merge(x::AbstractArray{T,1}, s::AbstractArray{T,1}, 
             if sum(abs.(peaks[1:ip] - ploc) .> m) == ip
                 ip += 1
                 peaks[ip] = ploc
-                info("peak anchor-[$ip] in correlation: $ploc")
+                verbose && info("peak anchor-[$ip] in correlation: $ploc")
                 lb = n - ploc + 1
                 rb = min(lb + m - 1, length(x))
                 
@@ -593,7 +593,7 @@ function extract_symbol_and_merge(x::AbstractArray{T,1}, s::AbstractArray{T,1}, 
                 end
 
                 y[1+(ip-1)*m : 1+(ip-1)*m+(rb-lb)] = x[lb:rb]
-                1+rb-lb < m && warn("incomplete segment extracted!")
+                verbose && (1+rb-lb < m) && warn("incomplete segment extracted!")
                 
                 if ip == rep
                     break
@@ -614,6 +614,19 @@ function signal_to_distortion_ratio(x::AbstractArray{T,1}, t::AbstractArray{T,1}
     y,diffpeak = extract_symbol_and_merge(x, t, 1)
     10log10.(sum(t.^2, 1) ./ sum((t-y).^2, 1))
 end
+
+
+
+
+function rand_stabilizer(seed, n)
+    # init seed and flush n realizations of the rng
+    srand(seed)
+    for i = 1:n
+        rand()
+    end
+    nothing
+end
+
 
 
 end # module
